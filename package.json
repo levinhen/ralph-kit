@@ -1,0 +1,33 @@
+{
+  "name": "@levinhen/ralph-kit",
+  "version": "0.1.0",
+  "description": "One-command installer for the Ralph autonomous-agent loop + Claude/Codex skills. Forked from snarktank/ralph.",
+  "license": "MIT",
+  "author": "levinhen",
+  "type": "module",
+  "bin": {
+    "ralph-kit": "bin/ralph-kit.mjs"
+  },
+  "files": [
+    "bin",
+    "template",
+    "LICENSE",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/levinhen/ralph-kit.git"
+  },
+  "keywords": [
+    "ralph",
+    "claude-code",
+    "codex",
+    "agent",
+    "autonomous",
+    "prd",
+    "scaffolding"
+  ]
+}

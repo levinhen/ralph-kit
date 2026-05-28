@@ -36,7 +36,7 @@ npx github:levinhen/ralph-kit doctor
 
 `init` and `sync` **never** touch:
 
-- `tasks/` — your PRD markdown files
+- `ralph/tasks/` — PRD markdown authored by the `/prd` skill
 - `ralph/runs/` — in-progress Ralph runs
 - `ralph/archive/` — completed/consolidated runs
 - `ralph/locks/` — runtime lock directories

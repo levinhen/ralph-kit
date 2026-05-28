@@ -516,7 +516,7 @@ EOF
 - Run-scoped PRD path: \`$PRD_REL_PATH\`
 - Run-scoped story dir: \`$STORIES_REL_DIR\`
 - Run-scoped progress dir: \`$PROGRESS_REL_DIR\`
-- Source PRD markdown (if present): \`tasks/prd-$RUN_ID.md\`
+- Source PRD markdown (if present): \`ralph/tasks/prd-$RUN_ID.md\`
 - Design ledger root: \`docs/design-ledger/\` (create the directory if missing)
 - Consolidation marker path (write this last, do NOT commit it): \`$CONSOLIDATION_STATE_REL_PATH\`
 

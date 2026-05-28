@@ -41,7 +41,7 @@ The append script writes this object as one compact line to `progress/<storyId>.
 
 ## Knowing the Codebase
 
-When you need to understand how an area currently works (data model, renderer, workbench panel, etc.), check `docs/design-ledger/<area>.md` before reading historical PRDs in `tasks/`. The ledger is the current truth. PRDs with `status: merged` frontmatter have been distilled into the ledger and may conflict with it — trust the ledger. Archived Ralph runs under `ralph/archive/` are historical; do not mine them for design intent.
+When you need to understand how an area currently works (data model, renderer, workbench panel, etc.), check `docs/design-ledger/<area>.md` before reading historical PRDs in `ralph/tasks/`. The ledger is the current truth. PRDs with `status: merged` frontmatter have been distilled into the ledger and may conflict with it — trust the ledger. Archived Ralph runs under `ralph/archive/` are historical; do not mine them for design intent.
 
 ## Consolidate Patterns
 

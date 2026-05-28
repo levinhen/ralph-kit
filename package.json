@@ -1,6 +1,6 @@
 {
   "name": "@levinhen/ralph-kit",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "One-command installer for the Ralph autonomous-agent loop + Claude/Codex skills. Forked from snarktank/ralph.",
   "license": "MIT",
   "author": "levinhen",

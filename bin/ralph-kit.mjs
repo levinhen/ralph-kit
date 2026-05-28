@@ -21,7 +21,7 @@ const AGENTS_END   = '<!-- ralph-kit:end -->';
 // Paths that the kit will NEVER touch in the target project, regardless of
 // whether they appear in the template. These are project data / runtime state.
 const PROTECTED_TARGET_PATHS = [
-  'tasks',
+  'ralph/tasks',
   'ralph/runs',
   'ralph/archive',
   'ralph/locks',
@@ -302,7 +302,7 @@ Usage:
                                files that differ from the kit.
 
 Protected paths (never touched by init or sync):
-  tasks/, ralph/runs/, ralph/archive/, ralph/locks/, ralph/progress/,
+  ralph/tasks/, ralph/runs/, ralph/archive/, ralph/locks/, ralph/progress/,
   ralph/stories/, and these files at ralph/: prd.json, progress.txt,
   state.json, .last-branch, .merge-back-done.
 

@@ -20,12 +20,12 @@ Create detailed Product Requirements Documents that are clear, actionable, and s
 1. Receive a feature description from the user
 2. Ask 3-5 essential clarifying questions (with lettered options)
 3. Generate a structured PRD based on answers
-4. Save to `tasks/prd-<feature-name>.md` (substitute `<feature-name>` with a kebab-case slug)
+4. Save to `ralph/tasks/prd-<feature-name>.md` (substitute `<feature-name>` with a kebab-case slug)
 
 **Important:** Do NOT start implementing. Just create the PRD.
 
 If the user also wants the PRD prepared for Ralph execution, use the `ralph` skill after saving the markdown PRD. The
-markdown task remains in `tasks/`, while the Ralph execution file should be generated as
+markdown task remains in `ralph/tasks/`, while the Ralph execution file should be generated as
 `ralph/runs/<run_id>/prd.json`. The Ralph skill/script owns run-scoped execution state such as
 `progress/shared-memory.json`, per-story `progress/<story_id>.jsonl`, `state.json`, and per-story `stories/*.json`.
 
@@ -161,7 +161,7 @@ The PRD reader may be a junior developer or AI agent. Therefore:
 ## Output
 
 - **Format:** Markdown (`.md`)
-- **Location:** `tasks/`
+- **Location:** `ralph/tasks/`
 - **Filename:** `prd-<feature-name>.md` (kebab-case)
 - **Ralph handoff:** Only when requested, also create `ralph/runs/<run_id>/prd.json` through the `ralph` skill.
 
@@ -265,5 +265,5 @@ Before saving the PRD:
 - [ ] User stories are small and specific
 - [ ] Functional requirements are numbered and unambiguous
 - [ ] Non-goals section defines clear boundaries
-- [ ] Saved to `tasks/prd-<feature-name>.md`
+- [ ] Saved to `ralph/tasks/prd-<feature-name>.md`
 - [ ] If Ralph handoff was requested, generated `ralph/runs/<run_id>/prd.json`

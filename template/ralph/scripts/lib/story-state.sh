@@ -179,9 +179,9 @@ make_prompt_with_story_context() {
   local story_jsonl_rel
   story_jsonl_rel="$(story_progress_jsonl_rel "$story_id")"
   if [[ "$RUN_MODE" == "scoped" ]]; then
-    append_command="bash scripts/ralph/append-progress-json.sh --run $RUN_ID --story $story_id --record path/to/progress-record.json"
+    append_command="bash ralph/scripts/append-progress-json.sh --run $RUN_ID --story $story_id --record path/to/progress-record.json"
   else
-    append_command="bash scripts/ralph/append-progress-json.sh --legacy --story $story_id --record path/to/progress-record.json"
+    append_command="bash ralph/scripts/append-progress-json.sh --legacy --story $story_id --record path/to/progress-record.json"
   fi
 
   cat "$base_prompt" > "$dest_prompt"

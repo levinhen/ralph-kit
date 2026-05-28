@@ -5,11 +5,17 @@ One-command installer for the [Ralph](https://github.com/snarktank/ralph) autono
 Drops the following into any project:
 
 ```
-.claude/skills/prd/SKILL.md       # /prd slash command
-.claude/skills/ralph/SKILL.md     # /ralph slash command
-scripts/ralph/                    # the Ralph loop (ralph.sh, lib/, CLAUDE.md, CODEX.md, ...)
-AGENTS.md                         # (created or annotated; existing content preserved)
+.claude/skills/prd/SKILL.md   # /prd slash command
+.claude/skills/ralph/SKILL.md # /ralph slash command
+ralph/
+  scripts/                    # static loop code (ralph.sh, lib/, CLAUDE.md, CODEX.md, ...)
+  runs/                       # active runs (created at runtime, not shipped)
+  archive/                    # completed-and-consolidated runs (created at runtime)
+  locks/                      # runtime lock dirs (created at runtime)
+AGENTS.md                     # (created or annotated; existing content preserved)
 ```
+
+Everything Ralph generates lives under `ralph/` — its code, runtime state, and archives are kept together and out of `scripts/`.
 
 ## Install
 
@@ -31,9 +37,10 @@ npx github:levinhen/ralph-kit doctor
 `init` and `sync` **never** touch:
 
 - `tasks/` — your PRD markdown files
-- `scripts/ralph/runs/` — in-progress and archived Ralph runs
-- `scripts/ralph/locks/` — runtime lock directories
-- `scripts/ralph/progress/` — legacy-mode progress logs
+- `ralph/runs/` — in-progress Ralph runs
+- `ralph/archive/` — completed/consolidated runs
+- `ralph/locks/` — runtime lock directories
+- `ralph/progress/`, `ralph/stories/`, `ralph/prd.json`, `ralph/progress.txt`, `ralph/state.json`, `ralph/.last-branch`, `ralph/.merge-back-done` — legacy-mode runtime files
 - An existing `AGENTS.md` — the snippet is printed for you to paste
 
 For every other file:
@@ -46,7 +53,7 @@ Run `ralph-kit doctor` any time to see drift.
 
 ## Attribution
 
-The core Ralph loop (`scripts/ralph/`) is derived from [snarktank/ralph](https://github.com/snarktank/ralph), MIT-licensed. This kit adds:
+The core Ralph loop (`ralph/scripts/`) is derived from [snarktank/ralph](https://github.com/snarktank/ralph) (MIT, originally laid out under `scripts/ralph/`). This kit adds:
 
 - Multi-agent support (`CLAUDE.md` + `CODEX.md` per-agent prompts).
 - Run-scoped layout (`runs/<run_id>/`) with consolidation + merge-back rounds.

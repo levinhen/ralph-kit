@@ -51,11 +51,12 @@ while [[ $# -gt 0 ]]; do
 done
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-RUNS_ROOT="$SCRIPT_DIR/runs"
+RALPH_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+REPO_ROOT="$(cd "$RALPH_ROOT/.." && pwd)"
+RUNS_ROOT="$RALPH_ROOT/runs"
 
 if [[ -z "$ARCHIVE_ROOT" ]]; then
-  ARCHIVE_ROOT="$SCRIPT_DIR/archive"
+  ARCHIVE_ROOT="$RALPH_ROOT/archive"
 fi
 
 if ! command -v jq >/dev/null 2>&1; then
@@ -117,7 +118,7 @@ run_is_archivable() {
 
 lock_is_active() {
   local run_id="$1"
-  local lock_dir="$SCRIPT_DIR/locks/run-$run_id.lock"
+  local lock_dir="$RALPH_ROOT/locks/run-$run_id.lock"
   local pid
 
   if [[ ! -d "$lock_dir" ]]; then

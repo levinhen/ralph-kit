@@ -33,14 +33,15 @@ while [[ $# -gt 0 ]]; do
 done
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+RALPH_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 if [[ "$USE_CURRENT" == "true" ]]; then
-  if [[ -d "$SCRIPT_DIR/stories" && -f "$SCRIPT_DIR/prd.json" ]]; then
+  if [[ -d "$RALPH_ROOT/stories" && -f "$RALPH_ROOT/prd.json" ]]; then
     USE_LEGACY="true"
   else
     mapfile -t current_runs < <(
-      find "$SCRIPT_DIR/runs" -mindepth 2 -maxdepth 2 -type d -name stories 2>/dev/null \
-        | sed "s|^$SCRIPT_DIR/runs/||; s|/stories$||" \
+      find "$RALPH_ROOT/runs" -mindepth 2 -maxdepth 2 -type d -name stories 2>/dev/null \
+        | sed "s|^$RALPH_ROOT/runs/||; s|/stories$||" \
         | sort
     )
     if [[ "${#current_runs[@]}" -ne 1 ]]; then
@@ -67,11 +68,11 @@ if [[ -n "$RUN_ID" && ! "$RUN_ID" =~ ^[A-Za-z0-9._-]+$ ]]; then
 fi
 
 if [[ "$USE_LEGACY" == "true" ]]; then
-  PRD_FILE="$SCRIPT_DIR/prd.json"
-  STORIES_DIR="$SCRIPT_DIR/stories"
-  PROGRESS_DIR="$SCRIPT_DIR/progress"
+  PRD_FILE="$RALPH_ROOT/prd.json"
+  STORIES_DIR="$RALPH_ROOT/stories"
+  PROGRESS_DIR="$RALPH_ROOT/progress"
 else
-  RUN_DIR="$SCRIPT_DIR/runs/$RUN_ID"
+  RUN_DIR="$RALPH_ROOT/runs/$RUN_ID"
   PRD_FILE="$RUN_DIR/prd.json"
   STORIES_DIR="$RUN_DIR/stories"
   PROGRESS_DIR="$RUN_DIR/progress"

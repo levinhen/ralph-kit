@@ -18,10 +18,10 @@ target_worktree_status() {
   git -C "$ACTIVE_WORKTREE" status --porcelain --untracked-files=all -- \
     . \
     ':(exclude).worktrees' \
-    ':(exclude)scripts/ralph/locks' \
-    ':(exclude)scripts/ralph/.merge-back-done' \
-    ':(exclude)scripts/ralph/runs/*/.merge-back-done' \
-    ':(exclude)scripts/ralph/.consolidation-done-*'
+    ':(exclude)ralph/locks' \
+    ':(exclude)ralph/.merge-back-done' \
+    ':(exclude)ralph/runs/*/.merge-back-done' \
+    ':(exclude)ralph/.consolidation-done-*'
 }
 
 target_worktree_clean_for_merge() {
@@ -86,14 +86,14 @@ base_merge_status() {
   git -C "$REPO_ROOT" status --porcelain --untracked-files=all -- \
     . \
     ':(exclude).worktrees' \
-    ':(exclude)scripts/ralph/locks' \
-    ':(exclude)scripts/ralph/.merge-back-done' \
-    ':(exclude)scripts/ralph/runs/*/.merge-back-done' \
-    ':(exclude)scripts/ralph/.consolidation-done-*' \
-    ':(exclude)scripts/ralph/ralph.sh' \
-    ':(exclude)scripts/ralph/lib' \
-    ':(exclude)scripts/ralph/MERGE_BACK.md' \
-    ':(exclude)scripts/ralph/CONSOLIDATE.md'
+    ':(exclude)ralph/locks' \
+    ':(exclude)ralph/.merge-back-done' \
+    ':(exclude)ralph/runs/*/.merge-back-done' \
+    ':(exclude)ralph/.consolidation-done-*' \
+    ':(exclude)ralph/scripts/ralph.sh' \
+    ':(exclude)ralph/scripts/lib' \
+    ':(exclude)ralph/scripts/MERGE_BACK.md' \
+    ':(exclude)ralph/scripts/CONSOLIDATE.md'
 }
 
 print_base_dirty_for_merge() {

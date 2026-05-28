@@ -63,6 +63,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+RALPH_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 if [[ "$USE_LEGACY" == "true" && -n "$RUN_ID" ]]; then
   echo "Error: Use either --run <run_id> or --legacy, not both." >&2
@@ -90,9 +91,9 @@ if [[ ! "$STORY_ID" =~ ^[A-Za-z0-9._-]+$ ]]; then
 fi
 
 if [[ "$USE_LEGACY" == "true" ]]; then
-  PROGRESS_DIR="$SCRIPT_DIR/progress"
+  PROGRESS_DIR="$RALPH_ROOT/progress"
 else
-  PROGRESS_DIR="$SCRIPT_DIR/runs/$RUN_ID/progress"
+  PROGRESS_DIR="$RALPH_ROOT/runs/$RUN_ID/progress"
 fi
 
 SHARED_MEMORY_FILE="$PROGRESS_DIR/shared-memory.json"

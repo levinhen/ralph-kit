@@ -36,7 +36,8 @@ if [[ ! "$RUN_ID" =~ ^[A-Za-z0-9._-]+$ ]]; then
 fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+RALPH_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+REPO_ROOT="$(cd "$RALPH_ROOT/.." && pwd)"
 
 require_git_base() {
   if ! git -C "$REPO_ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
@@ -64,7 +65,7 @@ require_git_base() {
 }
 
 if [[ -z "$SOURCE_PRD" ]]; then
-  SOURCE_PRD="$SCRIPT_DIR/prd.json"
+  SOURCE_PRD="$RALPH_ROOT/prd.json"
 fi
 
 if [[ ! -f "$SOURCE_PRD" ]]; then
@@ -74,7 +75,7 @@ fi
 
 require_git_base
 
-RUN_DIR="$SCRIPT_DIR/runs/$RUN_ID"
+RUN_DIR="$RALPH_ROOT/runs/$RUN_ID"
 TARGET_PRD="$RUN_DIR/prd.json"
 PROGRESS_FILE="$RUN_DIR/progress.txt"
 PROGRESS_DIR="$RUN_DIR/progress"

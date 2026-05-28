@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Consolidation marker lives outside the run dir so it survives the archive move.
-# Path: scripts/ralph/.consolidation-done-<run-id>
+# Path: ralph/.consolidation-done-<run-id>
 # This is set in ralph.sh as CONSOLIDATION_STATE_FILE and CONSOLIDATION_STATE_REL_PATH.
 
 consolidation_needed() {
@@ -24,7 +24,8 @@ consolidation_done() {
 }
 
 archive_consolidated_run() {
-  local archive_root="$RUNS_ROOT/_archive"
+  # Archive is now a top-level sibling of runs/ (was runs/_archive/).
+  local archive_root="$RALPH_ROOT/archive"
   local archive_name
   local archive_target
   local source_dir="$RUNS_ROOT/$RUN_ID"
@@ -44,13 +45,13 @@ archive_consolidated_run() {
 
   mkdir -p "$archive_root"
 
-  echo "Archiving completed run dir: scripts/ralph/runs/$RUN_ID -> scripts/ralph/runs/_archive/$archive_name"
+  echo "Archiving completed run dir: ralph/runs/$RUN_ID -> ralph/archive/$archive_name"
   mv "$source_dir" "$archive_target"
 
   # The .merge-back-done marker is an in-progress signal and should not be archived.
   rm -f "$archive_target/.merge-back-done"
 
-  git -C "$REPO_ROOT" add -A "scripts/ralph/runs/" >/dev/null 2>&1 || true
+  git -C "$REPO_ROOT" add -A "ralph/runs/" "ralph/archive/" >/dev/null 2>&1 || true
 
   if ! git -C "$REPO_ROOT" diff --cached --quiet; then
     git -C "$REPO_ROOT" commit -m "chore(ralph): archive completed run $RUN_ID" >/dev/null

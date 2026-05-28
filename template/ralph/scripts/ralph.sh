@@ -53,23 +53,29 @@ if [[ "$TOOL" != "claude" && "$TOOL" != "codex" ]]; then
 fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-ROOT_PRD_FILE="$SCRIPT_DIR/prd.json"
-ROOT_PROGRESS_FILE="$SCRIPT_DIR/progress.txt"
-ROOT_PROGRESS_DIR="$SCRIPT_DIR/progress"
+# Layout: <repo>/ralph/scripts/  ←  SCRIPT_DIR
+#         <repo>/ralph/          ←  RALPH_ROOT (runs/, archive/, locks/, legacy state)
+#         <repo>/                ←  REPO_ROOT
+RALPH_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+REPO_ROOT="$(cd "$RALPH_ROOT/.." && pwd)"
+# Legacy-mode root-level files live in $RALPH_ROOT, not $SCRIPT_DIR — only static
+# code/prompts belong under scripts/.
+ROOT_PRD_FILE="$RALPH_ROOT/prd.json"
+ROOT_PROGRESS_FILE="$RALPH_ROOT/progress.txt"
+ROOT_PROGRESS_DIR="$RALPH_ROOT/progress"
 ROOT_SHARED_MEMORY_FILE="$ROOT_PROGRESS_DIR/shared-memory.json"
-ROOT_ARCHIVE_DIR="$SCRIPT_DIR/archive"
-ROOT_LAST_BRANCH_FILE="$SCRIPT_DIR/.last-branch"
+ROOT_ARCHIVE_DIR="$RALPH_ROOT/archive"
+ROOT_LAST_BRANCH_FILE="$RALPH_ROOT/.last-branch"
 ROOT_CLAUDE_PROMPT_FILE="$SCRIPT_DIR/CLAUDE.md"
 ROOT_CODEX_PROMPT_FILE="$SCRIPT_DIR/CODEX.md"
 MERGE_BACK_PROMPT_FILE="$SCRIPT_DIR/MERGE_BACK.md"
-MERGE_BACK_STATE_FILE="$SCRIPT_DIR/.merge-back-done"
+MERGE_BACK_STATE_FILE="$RALPH_ROOT/.merge-back-done"
 CONSOLIDATE_PROMPT_FILE_TEMPLATE="$SCRIPT_DIR/CONSOLIDATE.md"
 CONSOLIDATION_STATE_FILE=""
 CONSOLIDATION_STATE_REL_PATH=""
 WORKTREE_ROOT="$REPO_ROOT/.worktrees"
-RUNS_ROOT="$SCRIPT_DIR/runs"
-LOCK_ROOT="$SCRIPT_DIR/locks"
+RUNS_ROOT="$RALPH_ROOT/runs"
+LOCK_ROOT="$RALPH_ROOT/locks"
 
 RUN_MODE=""
 ACTIVE_TOOL_PID=""
@@ -107,7 +113,7 @@ else
   RUN_MODE="legacy"
 fi
 
-ROOT_STATE_FILE="$SCRIPT_DIR/state.json"
+ROOT_STATE_FILE="$RALPH_ROOT/state.json"
 RUN_ID_LABEL="legacy"
 RUN_LOCK_DIR=""
 MERGE_LOCK_DIR=""
@@ -128,8 +134,8 @@ if [[ "$RUN_MODE" == "scoped" ]]; then
   ROOT_LAST_BRANCH_FILE="$RUN_DIR/.last-branch"
   ROOT_STATE_FILE="$RUN_DIR/state.json"
   MERGE_BACK_STATE_FILE="$RUN_DIR/.merge-back-done"
-  CONSOLIDATION_STATE_FILE="$SCRIPT_DIR/.consolidation-done-$RUN_ID"
-  CONSOLIDATION_STATE_REL_PATH="scripts/ralph/.consolidation-done-$RUN_ID"
+  CONSOLIDATION_STATE_FILE="$RALPH_ROOT/.consolidation-done-$RUN_ID"
+  CONSOLIDATION_STATE_REL_PATH="ralph/.consolidation-done-$RUN_ID"
   RUN_ID_LABEL="$RUN_ID"
   RUN_LOCK_DIR="$LOCK_ROOT/run-$RUN_ID.lock"
   acquire_dir_lock "$RUN_LOCK_DIR" "Ralph run $RUN_ID"
@@ -162,7 +168,7 @@ trap 'cleanup_on_signal TERM' TERM
 if [[ ! -f "$ROOT_PRD_FILE" ]]; then
   if [[ "$RUN_MODE" == "scoped" ]]; then
     echo "Error: Missing Ralph run PRD file: $ROOT_PRD_FILE"
-    echo "Create it at scripts/ralph/runs/$RUN_ID/prd.json, then rerun with --run $RUN_ID."
+    echo "Create it at ralph/runs/$RUN_ID/prd.json, then rerun with --run $RUN_ID."
   else
     echo "Error: Missing Ralph PRD file: $ROOT_PRD_FILE"
   fi
@@ -254,42 +260,43 @@ if [ -n "$TARGET_BRANCH" ]; then
   fi
 fi
 
-ACTIVE_SCRIPT_DIR="$ACTIVE_WORKTREE/scripts/ralph"
+ACTIVE_RALPH_ROOT="$ACTIVE_WORKTREE/ralph"
+ACTIVE_SCRIPT_DIR="$ACTIVE_RALPH_ROOT/scripts"
 CLAUDE_PROMPT_FILE="$ACTIVE_SCRIPT_DIR/CLAUDE.md"
 CODEX_PROMPT_FILE="$ACTIVE_SCRIPT_DIR/CODEX.md"
 ACTIVE_MERGE_BACK_PROMPT_FILE="$ACTIVE_SCRIPT_DIR/MERGE_BACK.md"
 
 if [[ "$RUN_MODE" == "scoped" ]]; then
-  ACTIVE_RUN_DIR="$ACTIVE_SCRIPT_DIR/runs/$RUN_ID"
+  ACTIVE_RUN_DIR="$ACTIVE_RALPH_ROOT/runs/$RUN_ID"
   PRD_FILE="$ACTIVE_RUN_DIR/prd.json"
   PROGRESS_FILE="$ACTIVE_RUN_DIR/progress.txt"
   PROGRESS_DIR="$ACTIVE_RUN_DIR/progress"
   SHARED_MEMORY_FILE="$PROGRESS_DIR/shared-memory.json"
   STORIES_DIR="$ACTIVE_RUN_DIR/stories"
-  ARCHIVE_DIR="$ACTIVE_RUN_DIR/archive"
+  ARCHIVE_DIR="$ACTIVE_RALPH_ROOT/archive"
   LAST_BRANCH_FILE="$ACTIVE_RUN_DIR/.last-branch"
   STATE_FILE="$ACTIVE_RUN_DIR/state.json"
-  PRD_REL_PATH="scripts/ralph/runs/$RUN_ID/prd.json"
-  PROGRESS_REL_PATH="scripts/ralph/runs/$RUN_ID/progress.txt"
-  PROGRESS_REL_DIR="scripts/ralph/runs/$RUN_ID/progress"
-  SHARED_MEMORY_REL_PATH="scripts/ralph/runs/$RUN_ID/progress/shared-memory.json"
-  STORIES_REL_DIR="scripts/ralph/runs/$RUN_ID/stories"
-  STATE_REL_PATH="scripts/ralph/runs/$RUN_ID/state.json"
+  PRD_REL_PATH="ralph/runs/$RUN_ID/prd.json"
+  PROGRESS_REL_PATH="ralph/runs/$RUN_ID/progress.txt"
+  PROGRESS_REL_DIR="ralph/runs/$RUN_ID/progress"
+  SHARED_MEMORY_REL_PATH="ralph/runs/$RUN_ID/progress/shared-memory.json"
+  STORIES_REL_DIR="ralph/runs/$RUN_ID/stories"
+  STATE_REL_PATH="ralph/runs/$RUN_ID/state.json"
 else
-  PRD_FILE="$ACTIVE_SCRIPT_DIR/prd.json"
-  PROGRESS_FILE="$ACTIVE_SCRIPT_DIR/progress.txt"
-  PROGRESS_DIR="$ACTIVE_SCRIPT_DIR/progress"
+  PRD_FILE="$ACTIVE_RALPH_ROOT/prd.json"
+  PROGRESS_FILE="$ACTIVE_RALPH_ROOT/progress.txt"
+  PROGRESS_DIR="$ACTIVE_RALPH_ROOT/progress"
   SHARED_MEMORY_FILE="$PROGRESS_DIR/shared-memory.json"
-  STORIES_DIR="$ACTIVE_SCRIPT_DIR/stories"
-  ARCHIVE_DIR="$ACTIVE_SCRIPT_DIR/archive"
-  LAST_BRANCH_FILE="$ACTIVE_SCRIPT_DIR/.last-branch"
-  STATE_FILE="$ACTIVE_SCRIPT_DIR/state.json"
-  PRD_REL_PATH="scripts/ralph/prd.json"
-  PROGRESS_REL_PATH="scripts/ralph/progress.txt"
-  PROGRESS_REL_DIR="scripts/ralph/progress"
-  SHARED_MEMORY_REL_PATH="scripts/ralph/progress/shared-memory.json"
-  STORIES_REL_DIR="scripts/ralph/stories"
-  STATE_REL_PATH="scripts/ralph/state.json"
+  STORIES_DIR="$ACTIVE_RALPH_ROOT/stories"
+  ARCHIVE_DIR="$ACTIVE_RALPH_ROOT/archive"
+  LAST_BRANCH_FILE="$ACTIVE_RALPH_ROOT/.last-branch"
+  STATE_FILE="$ACTIVE_RALPH_ROOT/state.json"
+  PRD_REL_PATH="ralph/prd.json"
+  PROGRESS_REL_PATH="ralph/progress.txt"
+  PROGRESS_REL_DIR="ralph/progress"
+  SHARED_MEMORY_REL_PATH="ralph/progress/shared-memory.json"
+  STORIES_REL_DIR="ralph/stories"
+  STATE_REL_PATH="ralph/state.json"
 fi
 
 sync_root_ralph_inputs
@@ -513,7 +520,7 @@ EOF
 - Design ledger root: \`docs/design-ledger/\` (create the directory if missing)
 - Consolidation marker path (write this last, do NOT commit it): \`$CONSOLIDATION_STATE_REL_PATH\`
 
-After consolidation, \`ralph.sh\` will mechanically move \`scripts/ralph/runs/$RUN_ID/\` to \`scripts/ralph/runs/_archive/<date>-$RUN_ID/\` and create a separate archive commit. Do not do the archive move yourself.
+After consolidation, \`ralph.sh\` will mechanically move \`ralph/runs/$RUN_ID/\` to \`ralph/archive/<date>-$RUN_ID/\` and create a separate archive commit. Do not do the archive move yourself.
 EOF
 
       run_selected_tool "$REPO_ROOT" "$CONSOLIDATE_PROMPT_FILE"

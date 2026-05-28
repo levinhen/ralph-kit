@@ -80,8 +80,9 @@ if [[ "$TOOL" != "claude" && "$TOOL" != "codex" ]]; then
 fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-RUNS_ROOT="$SCRIPT_DIR/runs"
+RALPH_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+REPO_ROOT="$(cd "$RALPH_ROOT/.." && pwd)"
+RUNS_ROOT="$RALPH_ROOT/runs"
 RALPH_SCRIPT="$SCRIPT_DIR/ralph.sh"
 TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
 

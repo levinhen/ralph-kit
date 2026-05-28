@@ -13,7 +13,7 @@ const TEMPLATE   = join(PKG_ROOT, 'template');
 const PKG        = JSON.parse(readFileSync(join(PKG_ROOT, 'package.json'), 'utf8'));
 const VERSION    = PKG.version;
 
-const MANIFEST_PATH_REL = 'scripts/ralph/.ralph-kit.json';
+const MANIFEST_PATH_REL = 'ralph/.ralph-kit.json';
 const AGENTS_SNIPPET_NAME = 'AGENTS.snippet.md';
 const AGENTS_BEGIN = '<!-- ralph-kit:begin -->';
 const AGENTS_END   = '<!-- ralph-kit:end -->';
@@ -22,16 +22,16 @@ const AGENTS_END   = '<!-- ralph-kit:end -->';
 // whether they appear in the template. These are project data / runtime state.
 const PROTECTED_TARGET_PATHS = [
   'tasks',
-  'scripts/ralph/runs',
-  'scripts/ralph/locks',
-  'scripts/ralph/progress',
-  'scripts/ralph/archive',
-  'scripts/ralph/stories',
-  'scripts/ralph/state.json',
-  'scripts/ralph/prd.json',
-  'scripts/ralph/progress.txt',
-  'scripts/ralph/.last-branch',
-  'scripts/ralph/.merge-back-done',
+  'ralph/runs',
+  'ralph/archive',
+  'ralph/locks',
+  'ralph/progress',
+  'ralph/stories',
+  'ralph/prd.json',
+  'ralph/progress.txt',
+  'ralph/state.json',
+  'ralph/.last-branch',
+  'ralph/.merge-back-done',
 ];
 
 const isWin = process.platform === 'win32';
@@ -302,10 +302,9 @@ Usage:
                                files that differ from the kit.
 
 Protected paths (never touched by init or sync):
-  tasks/, scripts/ralph/runs/, scripts/ralph/locks/, scripts/ralph/progress/,
-  scripts/ralph/archive/, scripts/ralph/stories/, and these files at
-  scripts/ralph/: state.json, prd.json, progress.txt, .last-branch,
-  .merge-back-done.
+  tasks/, ralph/runs/, ralph/archive/, ralph/locks/, ralph/progress/,
+  ralph/stories/, and these files at ralph/: prd.json, progress.txt,
+  state.json, .last-branch, .merge-back-done.
 
 Source: https://github.com/levinhen/ralph-kit
 Derived from https://github.com/snarktank/ralph (MIT).

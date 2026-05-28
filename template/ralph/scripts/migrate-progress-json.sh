@@ -8,6 +8,7 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+RALPH_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 split_one() {
   local source_json="$1"
@@ -52,12 +53,12 @@ split_one() {
 }
 
 # Scoped runs.
-for run_dir in "$SCRIPT_DIR/runs"/*/; do
+for run_dir in "$RALPH_ROOT/runs"/*/; do
   [[ -d "$run_dir" ]] || continue
   split_one "$run_dir/progress.json"
 done
 
 # Legacy root.
-split_one "$SCRIPT_DIR/progress.json"
+split_one "$RALPH_ROOT/progress.json"
 
 echo "Migration complete."

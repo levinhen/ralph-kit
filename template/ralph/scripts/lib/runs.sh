@@ -118,7 +118,7 @@ select_ralph_run() {
       echo "Completed runs are hidden from the default selector. Use --run <run_id> to rerun one explicitly."
     else
       echo "Error: No Ralph runs found."
-      echo "Create a run at scripts/ralph/runs/<run_id>/prd.json, then rerun with --run <run_id>."
+      echo "Create a run at ralph/runs/<run_id>/prd.json, then rerun with --run <run_id>."
     fi
     exit 1
   fi

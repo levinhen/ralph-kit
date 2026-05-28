@@ -44,7 +44,7 @@ make_prompt_with_run_context() {
 - Ralph worktree: \`$ACTIVE_WORKTREE\`
 - Base repo root: \`$REPO_ROOT\`
 
-Use the story, PRD, and progress paths from this context for all Ralph state reads and writes. Do not fall back to \`scripts/ralph/prd.json\`, \`scripts/ralph/progress.txt\`, or any legacy \`scripts/ralph/progress.json\` when this context gives run-scoped paths.
+Use the story, PRD, and progress paths from this context for all Ralph state reads and writes. Do not fall back to \`ralph/prd.json\`, \`ralph/progress.txt\`, or any legacy \`ralph/progress.json\` when this context gives run-scoped paths.
 EOF
 }
 

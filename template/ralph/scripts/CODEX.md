@@ -8,7 +8,7 @@ You are Codex running as an autonomous coding agent inside this repository.
 2. Use the `Ralph Current Story Context` appended to this prompt as the authoritative story input. Do not read the full PRD to choose work.
 3. Read only the sliced progress JSON supplied in `Ralph Current Story Context`: recent shared memory plus the current story's recent records. Do not open the shared-memory file or any story `.jsonl` directly, and do not read the full `progress.txt` for normal story work.
 4. Check you are on the target branch supplied in `Ralph Run Context`. If not, create or reuse that branch from the base branch supplied in `Ralph Run Context`; do not assume `main` exists. If a worktree is needed, use the worktree path supplied in context, or place it under the repository root.
-5. Implement exactly the current story from `Current Story JSON`.
+5. Read `userNeed` in `Current Story JSON` for the overall product intent and the `Covers:` clause at the end of the story's `description` for the slice this story owns. Implement exactly that one story — only the `Covers:` slice; use `userNeed` for context to fit the whole, but do not build work that belongs to other stories.
 6. Modify only that story's JSON file for story status updates.
 7. Run the appropriate quality checks for the code you changed.
 8. Update nearby `CLAUDE.md` files if you discover reusable patterns worth preserving.

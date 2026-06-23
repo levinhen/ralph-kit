@@ -20,6 +20,10 @@ Converts existing PRDs to the prd.json format that Ralph uses for autonomous exe
 Take a PRD (markdown file or text) and convert it to a run-scoped `prd.json` under
 `ralph/runs/<run_id>/prd.json`.
 
+**This is not a mechanical transcription.** Before splitting the PRD into stories, validate that the approach baked into
+the PRD actually fits the user's need — see [Validate the Approach Before Splitting Stories](#validate-the-approach-before-splitting-stories)
+below. Only after the approach is sound (or corrected) do you split it into user stories.
+
 Choose a stable `run_id` from the feature name unless the user provides one. Use kebab-case with only letters, numbers,
 dots, underscores, and dashes, matching the `ralph.sh --run <run_id>` validation rules. For example, `core-protocol`
 maps to `ralph/runs/core-protocol/prd.json` and `.worktrees/core-protocol`.
@@ -49,6 +53,37 @@ ralph/scripts/create-run.sh <run_id> path/to/prd.json
 
 ---
 
+## Validate the Approach Before Splitting Stories
+
+A PRD usually already bakes in a *solution* — both in its Technical/Design Considerations and implicitly in how its user
+stories are written ("add a `priority` column", "add a badge component" are already implementation choices). **Do not
+blindly convert that approach into stories.** A flawed approach faithfully transcribed just propagates the flaw into
+execution. Do this first:
+
+1. **Recover the user need.** Read the business-language statement of what the user actually wants from the PRD's
+   **Introduction/Overview** (the `prd` skill writes this in product terms, not implementation terms). If it is missing
+   or unclear, ask the user before proceeding — do not guess.
+
+2. **Step back from the PRD's proposed solution** and re-think it against that need:
+   - Does this approach actually solve the stated problem?
+   - Is it the simplest/most appropriate way, or is there a clearly better alternative?
+   - Any risks, gaps, or hidden assumptions? Does it over-build beyond the need, or under-build and miss the goal?
+
+3. **Decide:**
+   - **If the approach is sound** → proceed directly to splitting it into user stories. No need to check in with the user.
+   - **If the approach looks wrong or there's a clearly better option** → **stop.** Surface your concern and the
+     alternative to the user in plain terms, and wait for them to confirm or pick a direction. Do not start splitting
+     until the approach is agreed.
+
+4. **Split from the *agreed* approach**, not necessarily the PRD's original stories. The PRD's stories are a starting
+   suggestion; re-derive them from the validated approach if it changed. As you split, carry the user need into every
+   story — see [Give Every Story the Big Picture](#give-every-story-the-big-picture).
+
+> This makes conversion a thinking step, not a transcription step. The PRD answers *"what does the user need"*; this step
+> confirms *"is the planned solution the right one"* before locking it into executable stories.
+
+---
+
 ## Output Format
 
 ```json
@@ -56,11 +91,12 @@ ralph/scripts/create-run.sh <run_id> path/to/prd.json
   "project": "[Project Name]",
   "branchName": "ralph/[feature-name-kebab-case]",
   "description": "[Feature description from PRD title/intro]",
+  "userNeed": "[The confirmed business-language restatement of what the user actually needs — from the PRD Introduction/Overview]",
   "userStories": [
     {
       "id": "US-001",
       "title": "[Story title]",
-      "description": "As a [user], I want [feature] so that [benefit]",
+      "description": "As a [user], I want [feature] so that [benefit]. Covers: [which slice of the overall user need this story is responsible for].",
       "acceptanceCriteria": [
         "Criterion 1",
         "Criterion 2",
@@ -73,6 +109,34 @@ ralph/scripts/create-run.sh <run_id> path/to/prd.json
   ]
 }
 ```
+
+Write `userNeed` **once, at the root**. You do not copy it into each story by hand — when `ralph.sh` splits the PRD
+into per-story files, it copies the root `userNeed` into every `stories/<id>.json` automatically, so each memoryless
+iteration still sees it.
+
+---
+
+## Give Every Story the Big Picture
+
+Each Ralph iteration is a **fresh, memoryless agent that only sees its own story file** — `ralph.sh` splits each story
+object into `stories/<id>.json` and the agent is told not to read the full PRD. So if the overall intent only lives in
+the PRD, the agent building US-003 has no idea what it's ultimately for. Fix this by carrying two things into every
+story:
+
+1. **`userNeed` — the big picture, written once at the root.** Take the confirmed business-language restatement (the
+   same one recovered in *Validate the Approach*, from the PRD's Introduction/Overview) and write it as a single
+   **root-level `userNeed`** field. Keep it in product terms, not implementation terms. You do **not** duplicate it into
+   each story — `ralph.sh` copies the root `userNeed` into every `stories/<id>.json` when it splits the PRD
+   ([`initialize_story_files`](../../../ralph/scripts/lib/story-state.sh)), so each story file ends up self-contained and
+   its agent sees the big picture without reading the full PRD.
+
+2. **`description` scope clause — which slice this story owns.** When you split the work, every story's `description`
+   must end with a **`Covers:`** clause stating which part of the overall `userNeed` this story is responsible for. This
+   tells the agent how its one piece fits the whole, and makes the decomposition auditable (you can read the `Covers:`
+   clauses top to bottom and confirm they tile the whole need with no gaps or overlap).
+
+> Rule of thumb: read just the `userNeed` plus the `Covers:` clauses end to end. Together they should fully account for
+> the user's need — nothing missing, nothing doubled. If they don't tile cleanly, the split is wrong, not the wording.
 
 ---
 
@@ -166,11 +230,15 @@ interact with the UI, and confirm changes work.
 2. **IDs**: Sequential (US-001, US-002, etc.)
 3. **Priority**: Based on dependency order, then document order
 4. **All stories**: `passes: false` and empty `notes`
-5. **run_id**: Derive a stable run id from the feature name and write files under `ralph/runs/<run_id>/`.
-6. **branchName**: Derive a Ralph execution branch from the current local git branch context, using a feature-specific
+5. **userNeed**: Write the confirmed business-language restatement once as the top-level `userNeed` only; `ralph.sh`
+   copies it into each `stories/<id>.json` at split time, so do not hand-duplicate it into the story objects
+6. **description**: Every story's `description` ends with a `Covers:` clause naming the slice of `userNeed` it owns;
+   the clauses together must tile the whole need with no gaps or overlap
+7. **run_id**: Derive a stable run id from the feature name and write files under `ralph/runs/<run_id>/`.
+8. **branchName**: Derive a Ralph execution branch from the current local git branch context, using a feature-specific
    kebab-case suffix prefixed with `ralph/`. This branch is meant to be created from the repository's current
    checked-out local branch, not from an assumed default branch.
-7. **Always add**: "Typecheck passes" to every story's acceptance criteria
+9. **Always add**: "Typecheck passes" to every story's acceptance criteria
 
 ### Branch and Worktree Rules
 
@@ -228,11 +296,12 @@ Add ability to mark tasks with different statuses.
   "project": "TaskApp",
   "branchName": "ralph/task-status",
   "description": "Task Status Feature - Track task progress with status indicators",
+  "userNeed": "People managing a task list can't tell what's underway versus done, so things get dropped or duplicated. They want to see each task's progress at a glance, update it as work moves along, and narrow the list to whatever they're focused on.",
   "userStories": [
     {
       "id": "US-001",
       "title": "Add status field to tasks table",
-      "description": "As a developer, I need to store task status in the database.",
+      "description": "As a developer, I need to store task status in the database. Covers: the foundation for tracking progress — persisting each task's state so the rest of the need can build on it.",
       "acceptanceCriteria": [
         "Add status column: 'pending' | 'in_progress' | 'done' (default 'pending')",
         "Generate and run migration successfully",
@@ -245,7 +314,7 @@ Add ability to mark tasks with different statuses.
     {
       "id": "US-002",
       "title": "Display status badge on task cards",
-      "description": "As a user, I want to see task status at a glance.",
+      "description": "As a user, I want to see task status at a glance. Covers: the 'see progress at a glance' slice of the need.",
       "acceptanceCriteria": [
         "Each task card shows colored status badge",
         "Badge colors: gray=pending, blue=in_progress, green=done",
@@ -259,7 +328,7 @@ Add ability to mark tasks with different statuses.
     {
       "id": "US-003",
       "title": "Add status toggle to task list rows",
-      "description": "As a user, I want to change task status directly from the list.",
+      "description": "As a user, I want to change task status directly from the list. Covers: the 'update it as work moves along' slice of the need.",
       "acceptanceCriteria": [
         "Each row has status dropdown or toggle",
         "Changing status saves immediately",
@@ -274,7 +343,7 @@ Add ability to mark tasks with different statuses.
     {
       "id": "US-004",
       "title": "Filter tasks by status",
-      "description": "As a user, I want to filter the list to see only certain statuses.",
+      "description": "As a user, I want to filter the list to see only certain statuses. Covers: the 'narrow the list to whatever they're focused on' slice of the need.",
       "acceptanceCriteria": [
         "Filter dropdown: All | Pending | In Progress | Done",
         "Filter persists in URL params",
@@ -322,6 +391,9 @@ object per line into `progress/<story_id>.jsonl`.
 
 Before writing run-scoped `prd.json`, verify:
 
+- [ ] Validated the PRD's approach against the user need; if it looked off, confirmed the approach with the user before splitting
+- [ ] `userNeed` (the business-language restatement) is set once at the root (the script copies it into each story at split time)
+- [ ] Every story's `description` ends with a `Covers:` clause, and the clauses tile the whole `userNeed` (no gaps/overlap)
 - [ ] `run_id` is unique and valid for `ralph.sh --run <run_id>`
 - [ ] Files are written under `ralph/runs/<run_id>/`
 - [ ] `progress.txt`, `progress/shared-memory.json`, and `state.json` are initialized for new runs

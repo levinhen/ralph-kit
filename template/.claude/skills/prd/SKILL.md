@@ -18,9 +18,11 @@ Create detailed Product Requirements Documents that are clear, actionable, and s
 ## The Job
 
 1. Receive a feature description from the user
-2. Ask 3-5 essential clarifying questions (with lettered options)
-3. Generate a structured PRD based on answers
-4. Save to `ralph/tasks/prd-<feature-name>.md` (substitute `<feature-name>` with a kebab-case slug)
+2. Ask clarifying questions (with lettered options), prioritized by importance — no fixed count
+3. Review the answers and ask follow-up questions for anything still ambiguous; iterate until the key information is clear
+4. Restate the need in plain business language and get the user's confirmation before writing
+5. Generate a structured PRD based on answers; record any minor remaining uncertainties in Open Questions
+6. Save to `ralph/tasks/prd-<feature-name>.md` (substitute `<feature-name>` with a kebab-case slug)
 
 **Important:** Do NOT start implementing. Just create the PRD.
 
@@ -33,12 +35,21 @@ markdown task remains in `ralph/tasks/`, while the Ralph execution file should b
 
 ## Step 1: Clarifying Questions
 
-Ask only critical questions where the initial prompt is ambiguous. Focus on:
+Ask whatever questions the ambiguity actually requires — there is **no fixed count**. A simple, well-specified
+prompt may need only one or two; a vague one may need several. Only skip a topic when the prompt already answers it.
 
-- **Problem/Goal:** What problem does this solve?
-- **Core Functionality:** What are the key actions?
-- **Scope/Boundaries:** What should it NOT do?
-- **Success Criteria:** How do we know it's done?
+**Prioritize by importance.** Lead with the blocking questions that fundamentally shape the PRD, then move to
+secondary details. Group them so the user can see what matters most:
+
+- **Must-answer (blocking):** the PRD can't be written without these
+  - **Problem/Goal:** What problem does this solve?
+  - **Core Functionality:** What are the key actions?
+  - **Scope/Boundaries:** What should it NOT do?
+  - **Success Criteria:** How do we know it's done?
+- **Nice-to-have (refining):** sharpen the PRD but won't block it (target user, edge cases, design/tech preferences)
+
+Don't overwhelm the user — surface the must-answer questions first. Keep the lettered-option format so the user can
+answer quickly (e.g. "1A, 2C"), and let them defer the nice-to-have ones.
 
 ### Format Questions Like This:
 
@@ -66,13 +77,59 @@ This lets users respond with "1A, 2C, 3B" for quick iteration. Remember to inden
 
 ---
 
-## Step 2: PRD Structure
+## Step 2: Follow-up & Refinement
+
+Do **not** jump straight to writing the PRD after the first round of answers. Answers often reveal new gaps,
+contradict each other, or are themselves too vague to act on. Close those gaps first.
+
+After each round of answers:
+
+1. **Re-read the answers** against the PRD sections you're about to write. For each section (Goals, User Stories,
+   Functional Requirements, Non-Goals, Success Metrics), ask: do I have enough to write this unambiguously?
+2. **Ask targeted follow-up questions** for anything still unclear — a vague answer ("make it fast"), a contradiction,
+   or a new ambiguity surfaced by an earlier answer. Reuse the same prioritized, lettered-option format.
+3. **Iterate** until the must-answer items are all clear. Each round should get more specific, not broader.
+
+**Knowing when to stop:** stop once every blocking question is resolved — don't loop forever chasing minor details.
+Any small remaining uncertainties that aren't worth blocking on go into the PRD's **Open Questions** section
+(Step 4 → section 9), not another round of questions.
+
+---
+
+## Step 3: Restate the Need in Business Language
+
+Before writing the formal PRD, **play the requirement back to the user in plain business language and wait for their
+confirmation.** This is the final guard against building the wrong thing.
+
+What to write:
+
+- Describe the **problem, who is affected, the desired outcome, and the value** — in product/business terms.
+- Keep it short: a few sentences or a tight bullet list the user can scan and react to.
+
+What to avoid:
+
+- **No implementation talk.** Do not mention which files/tables/functions will change, what to add or refactor, schemas,
+  components, or any "how we'll build it" detail. That belongs in the PRD's technical sections, not here.
+- Example — write *"Users want to see at a glance which tasks are most urgent so they can tackle those first,"* **not**
+  *"add a `priority` column to the tasks table and a badge component to the card."*
+
+Then:
+
+1. **Stop and ask the user to confirm or correct** the restatement. Do not start writing the PRD yet.
+2. If they correct it, revise and reconfirm. If a correction reveals a real gap, go back to Step 2 and ask.
+3. Once confirmed, carry this agreed restatement forward — it becomes the basis of the PRD's
+   **Introduction/Overview** (Step 4 → section 1).
+
+---
+
+## Step 4: PRD Structure
 
 Generate the PRD with these sections:
 
 ### 1. Introduction/Overview
 
-Brief description of the feature and the problem it solves.
+Brief description of the feature and the problem it solves. Build this from the business-language restatement the user
+confirmed in Step 3 — keep it in product terms, not implementation terms.
 
 ### 2. Goals
 
@@ -142,7 +199,8 @@ How will success be measured?
 
 ### 9. Open Questions
 
-Remaining questions or areas needing clarification.
+Remaining questions or areas needing clarification — including any minor uncertainties left over from the
+clarification rounds (Step 2) that weren't worth blocking the PRD on. Be specific so they can be resolved later.
 
 ---
 
@@ -260,8 +318,11 @@ Add priority levels to tasks so users can focus on what matters most. Tasks can 
 
 Before saving the PRD:
 
-- [ ] Asked clarifying questions with lettered options
+- [ ] Asked clarifying questions with lettered options, prioritized (must-answer first)
+- [ ] Asked follow-up questions until the blocking items were clear
+- [ ] Restated the need in business language (no implementation talk) and got the user's confirmation
 - [ ] Incorporated user's answers
+- [ ] Captured any leftover uncertainties in Open Questions
 - [ ] User stories are small and specific
 - [ ] Functional requirements are numbered and unambiguous
 - [ ] Non-goals section defines clear boundaries

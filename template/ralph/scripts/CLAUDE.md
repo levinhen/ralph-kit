@@ -7,8 +7,8 @@ You are an autonomous coding agent working on a software project.
 1. Use the `Ralph Current Story Context` appended to this prompt as the authoritative story input. Do not read the full PRD to choose work.
 2. Read only the sliced progress JSON supplied in `Ralph Current Story Context`: recent shared memory plus the current story's recent records. Do not open the shared-memory file or any story `.jsonl` directly, and do not read the full `progress.txt` for normal story work.
 3. Check you're on the target branch supplied in `Ralph Run Context`. If not, create or reuse it from the base branch supplied in `Ralph Run Context`; do not assume `main` exists. If a worktree is needed, use the worktree path supplied in context, or place it under the repository root.
-4. Implement the current story from `Current Story JSON`
-5. Implement that single user story
+4. Read `userNeed` in `Current Story JSON` for the overall product intent (the big picture this run serves), and the `Covers:` clause at the end of the story's `description` for the specific slice this story owns.
+5. Implement exactly that one story — only the slice named in `Covers:`. Use `userNeed` for context and to make choices that fit the whole, but do NOT build work that belongs to other stories.
 6. Run quality checks (e.g., typecheck, lint, test - use whatever your project requires)
 7. Update CLAUDE.md files if you discover reusable patterns (see below)
 8. Update the current story file to set `passes: true` and useful `notes` for the completed story

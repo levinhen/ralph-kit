@@ -49,8 +49,16 @@ story_rel_path() {
 initialize_story_files() {
   local story_id
   local story_file
+  local root_user_need
 
   mkdir -p "$STORIES_DIR"
+
+  # The root-level `userNeed` (the business-language restatement of what the
+  # user actually wants) is the single source of truth. Copy it into each
+  # per-story file at split time so every memoryless iteration sees the big
+  # picture from its own story file without reading the full PRD. A story that
+  # already defines its own `userNeed` keeps it.
+  root_user_need=$(jq -c '.userNeed // null' "$PRD_FILE" 2>/dev/null || echo "null")
 
   jq -r '.userStories[]?.id // empty' "$PRD_FILE" \
     | while IFS= read -r story_id; do
@@ -62,9 +70,13 @@ initialize_story_files() {
           continue
         fi
 
-        jq --arg story_id "$story_id" '
+        jq --arg story_id "$story_id" --argjson rootNeed "$root_user_need" '
           .userStories[]
           | select(.id == $story_id)
+          | if ($rootNeed != null) and ((.userNeed // null) == null)
+            then .userNeed = $rootNeed
+            else .
+            end
         ' "$PRD_FILE" > "$story_file"
       done
 }

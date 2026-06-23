@@ -80,8 +80,10 @@ LOCK_ROOT="$RALPH_ROOT/locks"
 RUN_MODE=""
 ACTIVE_TOOL_PID=""
 ACTIVE_TOOL_PGID=""
+ACTIVE_TOOL_WINPID=""
 ACTIVE_TOOL_TEE_PID=""
 RALPH_PROCESS_GROUP=""
+ACTIVE_WORKTREE=""
 
 LIB_DIR="$SCRIPT_DIR/lib"
 
@@ -143,6 +145,9 @@ fi
 
 cleanup() {
   terminate_active_tool || true
+  if [[ "$RALPH_IS_WINDOWS" == "true" && -n "$ACTIVE_WORKTREE" && "$ACTIVE_WORKTREE" != "$REPO_ROOT" ]]; then
+    windows_sweep_worktree_strays "$ACTIVE_WORKTREE" || true
+  fi
   rm -f "$ACTIVE_CONTEXT_PROMPT_FILE" "$MERGE_PROMPT_FILE" "$FINALIZE_PROMPT_FILE" "$ITERATION_PROMPT_FILE" "$CONSOLIDATE_PROMPT_FILE" || true
   release_dir_lock "$MERGE_LOCK_DIR" || true
   release_dir_lock "$RUN_LOCK_DIR" || true

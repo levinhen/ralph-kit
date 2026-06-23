@@ -75,23 +75,28 @@ When you need to start a long-running server or watcher for verification, such a
 
 - NEVER run it in the foreground.
 - ALWAYS start it with full file descriptor redirection and capture its PID.
-- Prefer starting it in a new session so the whole process group can be stopped.
+- Start it from inside the Ralph worktree, so its command line resolves project-local binaries under the worktree and Ralph's safety net can identify and reap it if it is ever left behind. Do NOT write the log into the worktree (it would pollute `git status`).
 
 ```bash
+# Run from the worktree directory; log to a temp path outside the worktree.
 setsid nohup <cmd> > /tmp/ralph-server.log 2>&1 < /dev/null &
 SERVER_PID=$!
 echo "Started background server PID: $SERVER_PID"
 ```
 
-Before finishing the task, ALWAYS stop the background process. Prefer stopping the process group first, then fall back to the PID:
+Before finishing the task, ALWAYS stop the background process. Use the command for your platform:
 
 ```bash
+# POSIX (Linux/macOS): stop the whole process group, then fall back to the PID.
 kill -TERM "-$SERVER_PID" 2>/dev/null || kill "$SERVER_PID" 2>/dev/null || true
+
+# Windows (Git Bash): kill the native process tree by its Windows PID.
+taskkill //PID "$(cat /proc/$SERVER_PID/winpid 2>/dev/null)" //T //F 2>/dev/null || true
 ```
 
-If `setsid` is unavailable, use `nohup <cmd> > /tmp/ralph-server.log 2>&1 < /dev/null &`, capture `$!`, and still kill that PID before exit.
+If `setsid` is unavailable, use `nohup <cmd> > /tmp/ralph-server.log 2>&1 < /dev/null &`, capture `$!`, and still stop it before exit.
 
-NEVER leave a `npm run dev`, `vite`, `next dev`, watcher, or local server running when you finish.
+NEVER leave a `npm run dev`, `vite`, `next dev`, watcher, or local server running when you finish. Ralph runs a safety-net cleanup after each invocation — on Windows it terminates the tool's whole process tree and sweeps any process whose command line points into the worktree — but that is a backstop, not a substitute for stopping your own processes.
 
 ## Execution Rules
 

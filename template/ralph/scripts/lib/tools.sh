@@ -109,13 +109,11 @@ run_selected_tool() {
   start_tracked_process "$run_cwd" "$prompt_file" "$output_fifo" "${command_args[@]}"
   wait_for_active_tool "$output_file" || tool_exit_code=$?
 
-  if [[ -n "$ACTIVE_TOOL_PGID" ]] && process_group_alive "$ACTIVE_TOOL_PGID"; then
-    echo "Ralph tool returned but left processes running; stopping process group: $ACTIVE_TOOL_PGID" >&2
-    terminate_active_tool
-  fi
+  finalize_tool_cleanup "$run_cwd"
 
   ACTIVE_TOOL_PID=""
   ACTIVE_TOOL_PGID=""
+  ACTIVE_TOOL_WINPID=""
 
   wait "$ACTIVE_TOOL_TEE_PID" || true
   ACTIVE_TOOL_TEE_PID=""

@@ -2,15 +2,17 @@
 
 English | [简体中文](./README.zh-CN.md)
 
-One-command installer for the [Ralph](https://github.com/snarktank/ralph) autonomous-agent loop, packaged with companion Claude Code skills (`/prd`, `/ralph`) and Codex (`AGENTS.md`) integration.
+One-command installer for the [Ralph](https://github.com/snarktank/ralph) autonomous-agent loop, packaged with companion `/prd` and `/ralph` skills for both Claude Code (`.claude/skills/`) and Codex (`.agents/skills/`), plus `AGENTS.md` integration.
 
 The whole idea in one paragraph: **you describe a feature in chat; it becomes a PRD you review; the PRD is split into small, verifiable user stories; a shell loop then spawns one fresh AI agent per story inside an isolated git worktree — each implements, checks, and commits its slice — until every story passes; the branch is merged back into your base branch, the run's design decisions are distilled into a long-lived design ledger, and the run directory is archived.** Files are the memory, git is the checkpoint, and every agent invocation starts from a clean context window.
 
 Drops the following into any project:
 
 ```
-.claude/skills/prd/SKILL.md   # /prd slash command
-.claude/skills/ralph/SKILL.md # /ralph slash command
+.claude/skills/prd/SKILL.md   # /prd skill (Claude Code)
+.claude/skills/ralph/SKILL.md # /ralph skill (Claude Code)
+.agents/skills/prd/SKILL.md   # /prd skill (Codex — same content)
+.agents/skills/ralph/SKILL.md # /ralph skill (Codex — same content)
 ralph/
   scripts/                    # static loop code (ralph.sh, orchestrate.sh, lib/, agent prompts)
   tasks/                      # PRD markdown authored via /prd (created on first use; never touched)
@@ -225,7 +227,9 @@ The core Ralph loop (`ralph/scripts/`) is derived from [snarktank/ralph](https:/
 
 - Multi-agent support (`CLAUDE.md` + `CODEX.md` per-agent prompts).
 - Run-scoped layout (`runs/<run_id>/`) with consolidation + merge-back rounds.
-- Companion Claude Code skills (`/prd`, `/ralph`).
+- Companion `/prd` and `/ralph` skills for both Claude Code (`.claude/skills/`) and Codex (`.agents/skills/`).
 - A CLI installer that keeps copies in sync across multiple projects.
+
+> **Note:** the two skills are shipped to both `.claude/skills/` (Claude Code) and `.agents/skills/` (Codex's repo-level skill discovery) with byte-identical `SKILL.md` content. Edit both copies together — `ralph-kit doctor` flags either one if it drifts from the kit.
 
 See [`LICENSE`](./LICENSE) for full copyright notices.

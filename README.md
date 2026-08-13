@@ -128,7 +128,7 @@ ralph/scripts/ralph.sh --run <run_id> --tool claude 20   # or --tool codex (defa
 5. The loop syncs story state back into `prd.json` (amending it into the story commit when safe) and **trusts only the file**: an agent claiming `<promise>COMPLETE</promise>` while `passes` is still `false` gets a warning, and the loop continues.
 6. Repeat until all stories pass or `max_iterations` (default 10) is reached.
 
-Guard rails: a per-invocation idle timeout (default 360 s of silence) and optional hard timeout; a dedicated exit code (75) that aborts the whole loop on provider rate limits; and a post-invocation process-tree sweep that reaps leftover dev servers/watchers (including Windows Git Bash handling).
+Guard rails: a per-invocation idle timeout (default 360 s of silence) and optional hard timeout; a dedicated exit code (75) that aborts the whole loop on provider rate limits; and a post-invocation process-tree sweep that reaps leftover dev servers/watchers (including Windows Git Bash handling). Codex runs with `--json` while preserving its normal session: Ralph parses JSONL directly from a pipe, keeps only the latest 100 events in an in-memory ring, and writes those raw events to a temporary diagnostic file only when the invocation fails.
 
 ### Stage 4 — Merge-back: the branch returns to base
 

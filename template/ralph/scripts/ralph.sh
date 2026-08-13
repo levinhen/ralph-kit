@@ -82,6 +82,10 @@ ACTIVE_TOOL_PID=""
 ACTIVE_TOOL_PGID=""
 ACTIVE_TOOL_WINPID=""
 ACTIVE_TOOL_TEE_PID=""
+ACTIVE_CODEX_STREAM_PID=""
+ACTIVE_CODEX_STREAM_STATE_DIR=""
+ACTIVE_CODEX_DIAGNOSTIC_FILE=""
+LAST_CODEX_DIAGNOSTIC_FILE=""
 RALPH_PROCESS_GROUP=""
 ACTIVE_WORKTREE=""
 
@@ -145,6 +149,7 @@ fi
 
 cleanup() {
   terminate_active_tool || true
+  finish_codex_json_stream 130 || true
   if [[ "$RALPH_IS_WINDOWS" == "true" && -n "$ACTIVE_WORKTREE" && "$ACTIVE_WORKTREE" != "$REPO_ROOT" ]]; then
     windows_sweep_worktree_strays "$ACTIVE_WORKTREE" || true
   fi

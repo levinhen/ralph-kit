@@ -200,6 +200,22 @@ file_size_bytes() {
   wc -c < "$file_path" | tr -d '[:space:]'
 }
 
+activity_value() {
+  local activity_path="$1"
+  local activity_mode="${2:-size}"
+
+  if [[ "$activity_mode" == "counter" ]]; then
+    if [[ -s "$activity_path" ]]; then
+      tr -d '[:space:]' < "$activity_path" 2>/dev/null || echo 0
+    else
+      echo 0
+    fi
+    return
+  fi
+
+  file_size_bytes "$activity_path"
+}
+
 positive_integer_or_zero() {
   local value="$1"
 
@@ -207,14 +223,15 @@ positive_integer_or_zero() {
 }
 
 wait_for_active_tool() {
-  local output_file="$1"
+  local activity_path="$1"
+  local activity_mode="${2:-size}"
   local timeout_seconds="${RALPH_TOOL_TIMEOUT_SECONDS:-0}"
   local idle_timeout_seconds="${RALPH_TOOL_IDLE_TIMEOUT_SECONDS:-360}"
   local start_time
   local last_activity_time
   local now
-  local output_size
-  local last_output_size
+  local current_activity
+  local last_activity
   local tool_status=0
 
   if ! positive_integer_or_zero "$timeout_seconds"; then
@@ -227,15 +244,15 @@ wait_for_active_tool() {
 
   start_time="$(date +%s)"
   last_activity_time="$start_time"
-  last_output_size="$(file_size_bytes "$output_file")"
+  last_activity="$(activity_value "$activity_path" "$activity_mode")"
 
   while kill -0 "$ACTIVE_TOOL_PID" 2>/dev/null; do
     sleep 2
     now="$(date +%s)"
-    output_size="$(file_size_bytes "$output_file")"
+    current_activity="$(activity_value "$activity_path" "$activity_mode")"
 
-    if [[ "$output_size" != "$last_output_size" ]]; then
-      last_output_size="$output_size"
+    if [[ "$current_activity" != "$last_activity" ]]; then
+      last_activity="$current_activity"
       last_activity_time="$now"
     fi
 

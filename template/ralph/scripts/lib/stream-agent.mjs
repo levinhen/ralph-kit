@@ -20,7 +20,10 @@ import { createInterface } from 'node:readline'
 import { writeFileSync, renameSync } from 'node:fs'
 
 const RING_LIMIT = 100
-const ACTIVITY_FLUSH_MS = 200
+// The only consumer is wait_for_active_tool, which polls on a 2s sleep against a
+// 360s idle timeout. Anything below that poll interval guarantees a fresh value
+// between two polls; going faster just burns writes nobody can observe.
+const ACTIVITY_FLUSH_MS = 1000
 const RATE_LIMIT_PATTERN =
   /(^|\D)429(\D|$)|too many requests|rate[-_ ]?limit(ed|ing)?|quota exceeded/i
 
@@ -81,7 +84,6 @@ const errorTexts = []
 const assistantChunks = []
 
 let activityFlushedAt = 0
-let activityDirty = false
 
 function writeDisplay(text) {
   if (text === undefined || text === null || text === '') return
@@ -103,11 +105,9 @@ function writeFileAtomic(path, contents) {
 // still alive. Only parsed events bump it: a hung CLI spewing non-JSON noise
 // must still be able to trip the idle timeout.
 function touchActivity(force) {
-  activityDirty = true
   const now = Date.now()
   if (!force && now - activityFlushedAt < ACTIVITY_FLUSH_MS) return
   activityFlushedAt = now
-  activityDirty = false
   writeFileAtomic(options.activityFile, `${eventCount}\n`)
 }
 

@@ -153,7 +153,10 @@ run_selected_tool() {
     rm -f "$diagnostic_file"
   fi
 
-  rm -f "$output_fifo" "$activity_file" "$summary_file"
+  # The .tmp siblings only survive a reader killed mid-write, but leaving one
+  # behind would block the rmdir and strand the whole scratch dir.
+  rm -f "$output_fifo" "$activity_file" "$activity_file.tmp" \
+    "$summary_file" "$summary_file.tmp"
   rmdir "$stream_state_dir" 2>/dev/null || true
   ACTIVE_STREAM_STATE_DIR=""
 

@@ -634,7 +634,7 @@ EOF
     echo "Warning: $CURRENT_STORY_ID is still not marked passes=true in $PRD_FILE"
   fi
 
-  if [[ "$ALL_COMPLETE" == "true" && merge_back_needed ]]; then
+  if [[ "$ALL_COMPLETE" == "true" ]] && merge_back_needed; then
     echo "All stories are marked complete in $PRD_FILE. The next iteration will run the dedicated merge-back round."
   elif [[ "$ALL_COMPLETE" == "true" ]]; then
     ralph_progress_update "complete" "" "$i"

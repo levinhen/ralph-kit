@@ -52,6 +52,13 @@ if [[ "$TOOL" != "claude" && "$TOOL" != "codex" ]]; then
   exit 1
 fi
 
+# Fail here rather than mid-iteration: the agent event stream is read by
+# lib/stream-agent.mjs, so node has to be on PATH before any lock is taken.
+if ! command -v node >/dev/null 2>&1 && ! command -v node.exe >/dev/null 2>&1; then
+  echo "Error: Ralph needs Node.js (>= 18) on PATH to read the agent event stream."
+  exit 1
+fi
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Layout: <repo>/ralph/scripts/  ←  SCRIPT_DIR
 #         <repo>/ralph/          ←  RALPH_ROOT (runs/, archive/, locks/, legacy state)
@@ -81,11 +88,11 @@ RUN_MODE=""
 ACTIVE_TOOL_PID=""
 ACTIVE_TOOL_PGID=""
 ACTIVE_TOOL_WINPID=""
-ACTIVE_TOOL_TEE_PID=""
-ACTIVE_CODEX_STREAM_PID=""
-ACTIVE_CODEX_STREAM_STATE_DIR=""
-ACTIVE_CODEX_DIAGNOSTIC_FILE=""
-LAST_CODEX_DIAGNOSTIC_FILE=""
+ACTIVE_STREAM_STATE_DIR=""
+LAST_TOOL_DIAGNOSTIC_FILE=""
+LAST_TOOL_EXIT_CODE=0
+LAST_TOOL_SAW_COMPLETION="false"
+CONSECUTIVE_TOOL_FAILURES=0
 RALPH_PROCESS_GROUP=""
 ACTIVE_WORKTREE=""
 
@@ -152,7 +159,11 @@ cleanup() {
   # Release the pinned row first so shutdown messages scroll normally.
   ralph_progress_stop || true
   terminate_active_tool || true
-  finish_codex_json_stream 130 || true
+  # The stream reader is not killed here: closing the tool also closes the FIFO
+  # writer, so it reaches EOF on its own. Only its scratch dir needs clearing.
+  if [[ -n "$ACTIVE_STREAM_STATE_DIR" ]]; then
+    rm -rf "$ACTIVE_STREAM_STATE_DIR" || true
+  fi
   if [[ "$RALPH_IS_WINDOWS" == "true" && -n "$ACTIVE_WORKTREE" && "$ACTIVE_WORKTREE" != "$REPO_ROOT" ]]; then
     windows_sweep_worktree_strays "$ACTIVE_WORKTREE" || true
   fi

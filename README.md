@@ -24,7 +24,7 @@ AGENTS.md                     # (created or annotated; existing content preserve
 
 Everything Ralph generates lives under `ralph/` — its code, runtime state, and archives are kept together and out of `scripts/`.
 
-**Requirements:** Bash (macOS, Linux, or Git Bash on Windows), `git`, `jq`, and at least one agent CLI on `PATH` — `claude` (Claude Code) or `codex`.
+**Requirements:** Bash (macOS, Linux, or Git Bash on Windows), `git`, `jq`, Node.js 18+, and at least one agent CLI on `PATH` — `claude` (Claude Code) or `codex`.
 
 ## How it works — the full flow
 

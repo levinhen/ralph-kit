@@ -291,10 +291,13 @@ collect_descendant_pids() {
   done
 }
 
+# Only the tool's own process tree is touched. The stream reader is left running
+# on purpose: killing the tool closes the FIFO's writer, so the reader reaches
+# EOF and gets to drain and summarise what it already has instead of dying with
+# a half-read buffer.
 terminate_active_tool() {
   local pgid="$ACTIVE_TOOL_PGID"
   local pid="$ACTIVE_TOOL_PID"
-  local tee_pid="$ACTIVE_TOOL_TEE_PID"
   local descendant_pids=""
   local attempts=0
 
@@ -309,9 +312,6 @@ terminate_active_tool() {
     fi
     # Fall back to an MSYS-level signal for anything cygwin still tracks.
     [[ -n "$pid" ]] && kill -TERM "$pid" 2>/dev/null || true
-    if [[ -n "$tee_pid" ]]; then
-      kill "$tee_pid" 2>/dev/null || true
-    fi
     return 0
   fi
 
@@ -341,10 +341,6 @@ terminate_active_tool() {
     if [[ -n "$descendant_pids" ]]; then
       kill -TERM $descendant_pids 2>/dev/null || true
     fi
-  fi
-
-  if [[ -n "$tee_pid" ]]; then
-    kill "$tee_pid" 2>/dev/null || true
   fi
 }
 

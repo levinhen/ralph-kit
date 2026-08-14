@@ -22,7 +22,7 @@ AGENTS.md                     # （创建或追加标记段；已有内容保留
 
 Ralph 生成的一切都收在 `ralph/` 下——代码、运行时状态、归档放在一起，不污染 `scripts/`。
 
-**环境要求：** Bash（macOS、Linux，或 Windows 上的 Git Bash）、`git`、`jq`，以及 `PATH` 上至少一个 agent CLI——`claude`（Claude Code）或 `codex`。
+**环境要求：** Bash（macOS、Linux，或 Windows 上的 Git Bash）、`git`、`jq`、Node.js 18+，以及 `PATH` 上至少一个 agent CLI——`claude`（Claude Code）或 `codex`。
 
 ## 整体实现流程
 

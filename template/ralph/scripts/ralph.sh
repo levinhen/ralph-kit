@@ -98,6 +98,7 @@ source "$LIB_DIR/notify.sh"
 source "$LIB_DIR/sync.sh"
 source "$LIB_DIR/tools.sh"
 source "$LIB_DIR/story-state.sh"
+source "$LIB_DIR/progress-bar.sh"
 source "$LIB_DIR/merge-back.sh"
 source "$LIB_DIR/consolidate.sh"
 
@@ -156,6 +157,7 @@ cleanup() {
   rm -f "$ACTIVE_CONTEXT_PROMPT_FILE" "$MERGE_PROMPT_FILE" "$FINALIZE_PROMPT_FILE" "$ITERATION_PROMPT_FILE" "$CONSOLIDATE_PROMPT_FILE" || true
   release_dir_lock "$MERGE_LOCK_DIR" || true
   release_dir_lock "$RUN_LOCK_DIR" || true
+  ralph_progress_stop || true
 }
 
 cleanup_on_signal() {
@@ -174,6 +176,7 @@ cleanup_on_signal() {
 trap cleanup EXIT
 trap 'cleanup_on_signal INT' INT
 trap 'cleanup_on_signal TERM' TERM
+trap 'ralph_progress_resize' WINCH
 
 if [[ ! -f "$ROOT_PRD_FILE" ]]; then
   if [[ "$RUN_MODE" == "scoped" ]]; then
@@ -420,6 +423,7 @@ fi
 
 echo "Starting Ralph - Tool: $TOOL - Max iterations: $MAX_ITERATIONS"
 echo "Tool guard: timeout=${RALPH_TOOL_TIMEOUT_SECONDS:-0}s idle=${RALPH_TOOL_IDLE_TIMEOUT_SECONDS:-360}s"
+ralph_progress_start "$PRD_FILE" "$MAX_ITERATIONS"
 
 for i in $(seq 1 $MAX_ITERATIONS); do
   sync_story_files_to_prd
@@ -432,18 +436,21 @@ for i in $(seq 1 $MAX_ITERATIONS); do
   ' "$PRD_FILE" 2>/dev/null || echo "")
 
   if [[ -n "$CURRENT_STORY_ID" ]]; then
+    ralph_progress_update "working" "$CURRENT_STORY_ID" "$i"
     rm -f "$MERGE_BACK_STATE_FILE"
     [[ -n "$CONSOLIDATION_STATE_FILE" ]] && rm -f "$CONSOLIDATION_STATE_FILE"
   fi
 
   if [[ -z "$CURRENT_STORY_ID" ]]; then
     if merge_back_needed && ! merge_back_done; then
+      ralph_progress_update "merge-back" "" "$i"
       echo ""
       echo "==============================================================="
       echo "  Ralph Merge-Back Round ($TOOL) - $TARGET_BRANCH -> $BASE_BRANCH"
       echo "==============================================================="
 
       if ! target_worktree_clean_for_merge; then
+        ralph_progress_update "finalizing" "" "$i"
         if run_target_worktree_finalization; then
           echo "Ralph target worktree is clean. The next iteration will start merge-back."
         fi
@@ -506,6 +513,7 @@ EOF
     fi
 
     if consolidation_needed && ! consolidation_done; then
+      ralph_progress_update "consolidating" "" "$i"
       echo ""
       echo "==============================================================="
       echo "  Ralph Consolidation Round ($TOOL) - $RUN_ID -> design-ledger"
@@ -538,6 +546,7 @@ EOF
       CONSOLIDATE_PROMPT_FILE=""
 
       if consolidation_done; then
+        ralph_progress_update "complete" "" "$i"
         archive_consolidated_run
         echo ""
         if merge_back_needed; then
@@ -564,6 +573,7 @@ EOF
       archive_consolidated_run
     fi
 
+    ralph_progress_update "complete" "" "$i"
     echo ""
     echo "Ralph completed all tasks!"
     echo "All stories in $PRD_FILE already have passes=true"
@@ -592,6 +602,7 @@ EOF
   ITERATION_PROMPT_FILE=""
 
   sync_story_files_to_prd_after_iteration "$PRE_ITERATION_HEAD"
+  ralph_progress_update "checking" "$CURRENT_STORY_ID" "$i"
 
   STORY_PASSED=$(jq -r --arg story_id "$CURRENT_STORY_ID" '
     .userStories[]
@@ -614,6 +625,7 @@ EOF
   if [[ "$ALL_COMPLETE" == "true" && merge_back_needed ]]; then
     echo "All stories are marked complete in $PRD_FILE. The next iteration will run the dedicated merge-back round."
   elif [[ "$ALL_COMPLETE" == "true" ]]; then
+    ralph_progress_update "complete" "" "$i"
     echo ""
     echo "Ralph completed all tasks!"
     echo "Completed at iteration $i of $MAX_ITERATIONS"

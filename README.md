@@ -128,6 +128,8 @@ ralph/scripts/ralph.sh --run <run_id> --tool claude 20   # or --tool codex (defa
 5. The loop syncs story state back into `prd.json` (amending it into the story commit when safe) and **trusts only the file**: an agent claiming `<promise>COMPLETE</promise>` while `passes` is still `false` gets a warning, and the loop continues.
 6. Repeat until all stories pass or `max_iterations` (default 10) is reached.
 
+Interactive terminals keep a progress bar pinned to the bottom row with the completed-story count, current US, phase, and iteration while agent logs scroll above it. It disables itself when output is redirected (including parallel orchestrator logs); set `RALPH_PROGRESS=0` to turn it off explicitly.
+
 Guard rails: a per-invocation idle timeout (default 360 s of silence) and optional hard timeout; a dedicated exit code (75) that aborts the whole loop on provider rate limits; and a post-invocation process-tree sweep that reaps leftover dev servers/watchers (including Windows Git Bash handling). Codex runs with `--json` while preserving its normal session: Ralph parses JSONL directly from a pipe, keeps only the latest 100 events in an in-memory ring, and writes those raw events to a temporary diagnostic file only when the invocation fails.
 
 ### Stage 4 — Merge-back: the branch returns to base
@@ -182,6 +184,7 @@ Lists incomplete runs, numbers them, and executes a staged plan: `,` = parallel 
 | `RALPH_TOOL_IDLE_TIMEOUT_SECONDS` | `360` | kill an agent invocation after this much silence |
 | `RALPH_TOOL_TIMEOUT_SECONDS` | `0` (off) | hard cap per invocation |
 | `RALPH_SHARED_MEMORY_ITEMS` / `RALPH_STORY_PROGRESS_RECORDS` | `40` / `5` | prompt memory slice sizes |
+| `RALPH_PROGRESS` | `1` | pinned story progress in interactive terminals; set to `0` to disable |
 | `RALPH_NOTIFY` / `RALPH_NOTIFY_SOUND` | `1` | desktop notifications |
 | `RALPH_PLAN` | — | default plan for `orchestrate.sh` |
 

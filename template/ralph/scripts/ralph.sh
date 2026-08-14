@@ -149,6 +149,8 @@ if [[ "$RUN_MODE" == "scoped" ]]; then
 fi
 
 cleanup() {
+  # Release the pinned row first so shutdown messages scroll normally.
+  ralph_progress_stop || true
   terminate_active_tool || true
   finish_codex_json_stream 130 || true
   if [[ "$RALPH_IS_WINDOWS" == "true" && -n "$ACTIVE_WORKTREE" && "$ACTIVE_WORKTREE" != "$REPO_ROOT" ]]; then
@@ -157,7 +159,6 @@ cleanup() {
   rm -f "$ACTIVE_CONTEXT_PROMPT_FILE" "$MERGE_PROMPT_FILE" "$FINALIZE_PROMPT_FILE" "$ITERATION_PROMPT_FILE" "$CONSOLIDATE_PROMPT_FILE" || true
   release_dir_lock "$MERGE_LOCK_DIR" || true
   release_dir_lock "$RUN_LOCK_DIR" || true
-  ralph_progress_stop || true
 }
 
 cleanup_on_signal() {
@@ -176,7 +177,7 @@ cleanup_on_signal() {
 trap cleanup EXIT
 trap 'cleanup_on_signal INT' INT
 trap 'cleanup_on_signal TERM' TERM
-trap 'ralph_progress_resize' WINCH
+trap 'ralph_progress_resize || true' WINCH
 
 if [[ ! -f "$ROOT_PRD_FILE" ]]; then
   if [[ "$RUN_MODE" == "scoped" ]]; then

@@ -126,7 +126,7 @@ ralph/scripts/ralph.sh --run <run_id> --tool claude 20   # 或 --tool codex（�
 5. 循环把故事状态同步回 `prd.json`（安全时 amend 进故事提交），并且**只认文件**：agent 光喊 `<promise>COMPLETE</promise>` 而 `passes` 仍是 `false`，只会得到一条警告，循环照常继续。
 6. 重复，直到所有故事通过，或达到 `max_iterations`（默认 10）。
 
-交互式终端的最底部会常驻一条进度栏，显示已完成故事数、当前 US、所处阶段和迭代次数；上方的 agent 日志照常滚动。输出被重定向到文件（包括并行编排日志）时会自动关闭，设置 `RALPH_PROGRESS=0` 也可手动关闭。
+交互式终端的最底部会常驻一条进度栏，显示已完成故事数、当前 US、所处阶段、该阶段已耗时和迭代次数；上方的 agent 日志照常滚动。后台心跳每 `RALPH_PROGRESS_TICK_SECONDS` 秒（默认 2）重绘一次，因此 agent 静默时计时仍在走；Ralph 被强杀时它也会自行恢复终端。输出被重定向到文件（包括并行编排日志）时会自动关闭——控制码只写 `/dev/tty`，绝不会进日志；设置 `RALPH_PROGRESS=0` 也可手动关闭。
 
 防护措施：单次调用的空闲超时（默认静默 360 秒即终止）和可选的硬超时；命中限流时以专用退出码 75 中止整个循环；每次调用后清扫进程树，回收残留的 dev server / watcher（含 Windows Git Bash 的特殊处理）。Codex 使用 `--json` 且保留正常 session：Ralph 直接从管道实时解析 JSONL，只在内存环形缓冲中保留最近 100 条事件；仅当本次调用失败时，才把这些原始事件写入临时诊断文件。
 

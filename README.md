@@ -206,6 +206,11 @@ npx github:levinhen/ralph-kit sync
 npx github:levinhen/ralph-kit doctor
 ```
 
+After `init` or `sync`, ralph-kit makes a best-effort Git commit containing only
+the files generated or updated by that invocation. Git failures (for example,
+when the target is not a repository or no author identity is configured) are
+silently ignored and never make the command fail.
+
 ## Safety guarantees
 
 `init` and `sync` **never** touch:

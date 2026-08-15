@@ -2,8 +2,9 @@
 // ralph-kit: install / sync the Ralph autonomous-agent loop into a target project.
 // Forked from snarktank/ralph (MIT). See README.md for layout and safety guarantees.
 
-import { readFileSync, writeFileSync, statSync, mkdirSync, readdirSync, copyFileSync, chmodSync, existsSync } from 'node:fs';
-import { dirname, join, relative, resolve } from 'node:path';
+import { readFileSync, writeFileSync, statSync, mkdirSync, readdirSync, copyFileSync, chmodSync, existsSync, realpathSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -85,6 +86,7 @@ function writeManifest(target) {
     source: 'github:levinhen/ralph-kit',
   };
   writeFileSync(manifestPath, JSON.stringify(data, null, 2) + '\n');
+  return manifestPath;
 }
 
 function readManifest(target) {
@@ -155,11 +157,49 @@ function summarize(counts) {
   return parts.join(', ') || 'nothing to do';
 }
 
+// Commit only the files written by this invocation. Git is an optional
+// checkpoint: a missing repository, missing identity, rejected hook, or any
+// other Git failure must never make init/sync fail or print an error.
+function tryCommitGeneratedFiles(target, generatedFiles, mode) {
+  try {
+    const probe = spawnSync('git', ['-C', target, 'rev-parse', '--show-toplevel'], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+    if (probe.status !== 0) return;
+
+    const reportedRepoRoot = probe.stdout.trim();
+    if (!reportedRepoRoot) return;
+    const repoRoot = realpathSync(reportedRepoRoot);
+
+    const pathspecs = [...new Set(generatedFiles.map(file => relative(repoRoot, realpathSync(file))))]
+      .filter(file => file && file !== '..' && !file.startsWith('../') &&
+        !file.startsWith('..\\') && !isAbsolute(file));
+    if (!pathspecs.length) return;
+
+    const add = spawnSync('git', ['-C', repoRoot, 'add', '--force', '--', ...pathspecs], {
+      stdio: 'ignore',
+    });
+    if (add.status !== 0) return;
+
+    const diff = spawnSync('git', ['-C', repoRoot, 'diff', '--cached', '--quiet', '--', ...pathspecs], {
+      stdio: 'ignore',
+    });
+    if (diff.status !== 1) return;
+
+    const message = mode === 'init' ? 'chore: initialize ralph kit' : 'chore: sync ralph kit';
+    spawnSync('git', ['-C', repoRoot, 'commit', '--only', '-m', message, '--', ...pathspecs], {
+      stdio: 'ignore',
+    });
+  } catch {}
+}
+
 function cmdInit(target) {
   console.log(bold(`ralph-kit ${VERSION}`) + ` → init ${target}`);
   const files = planFiles(target);
   const counts = { created: 0, updated: 0, identical: 0, conflicts: 0, backedUp: 0 };
   const conflicts = [];
+  const generatedFiles = [];
 
   for (const rel of files) {
     if (isProtected(rel)) continue;
@@ -167,6 +207,7 @@ function cmdInit(target) {
     const dst = join(target, rel);
     if (!existsSync(dst)) {
       copyOne(src, dst);
+      generatedFiles.push(dst);
       counts.created++;
       continue;
     }
@@ -179,12 +220,14 @@ function cmdInit(target) {
   }
 
   const agents = handleAgentsMd(target, 'init');
+  if (agents.changed) generatedFiles.push(join(target, 'AGENTS.md'));
   if (agents.action === 'created')           counts.created++;
   else if (agents.action === 'updated')      counts.updated++;
   else if (agents.action === 'inserted')     counts.updated++;
   else if (agents.action === 'identical')    counts.identical++;
 
-  writeManifest(target);
+  generatedFiles.push(writeManifest(target));
+  tryCommitGeneratedFiles(target, generatedFiles, 'init');
 
   console.log(summarize(counts));
   if (conflicts.length) {
@@ -207,6 +250,7 @@ function cmdSync(target) {
   const files = planFiles(target);
   const counts = { created: 0, updated: 0, identical: 0, conflicts: 0, backedUp: 0 };
   const backedUp = [];
+  const generatedFiles = [];
 
   for (const rel of files) {
     if (isProtected(rel)) continue;
@@ -214,6 +258,7 @@ function cmdSync(target) {
     const dst = join(target, rel);
     if (!existsSync(dst)) {
       copyOne(src, dst);
+      generatedFiles.push(dst);
       counts.created++;
       continue;
     }
@@ -225,18 +270,21 @@ function cmdSync(target) {
     const bak = dst + '.ralph-kit.bak';
     copyFileSync(dst, bak);
     copyOne(src, dst);
+    generatedFiles.push(dst, bak);
     backedUp.push(rel);
     counts.backedUp++;
     counts.updated++;
   }
 
   const agents = handleAgentsMd(target, 'sync');
+  if (agents.changed) generatedFiles.push(join(target, 'AGENTS.md'));
   if (agents.action === 'created')        counts.created++;
   else if (agents.action === 'updated')   counts.updated++;
   else if (agents.action === 'inserted')  counts.updated++;
   else if (agents.action === 'identical') counts.identical++;
 
-  writeManifest(target);
+  generatedFiles.push(writeManifest(target));
+  tryCommitGeneratedFiles(target, generatedFiles, 'sync');
 
   console.log(summarize(counts));
   if (backedUp.length) {

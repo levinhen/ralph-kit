@@ -204,6 +204,8 @@ npx github:levinhen/ralph-kit sync
 npx github:levinhen/ralph-kit doctor
 ```
 
+`init` 或 `sync` 完成后，ralph-kit 会尽力创建一个 Git 提交，且只包含本次动作创建或更新的文件。Git 提交失败（例如目标不在 Git 仓库中，或未配置提交者身份）时会静默忽略，不会导致命令失败。
+
 ## 安全保证
 
 `init` 和 `sync` **绝不**触碰：

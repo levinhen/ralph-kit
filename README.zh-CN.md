@@ -123,6 +123,7 @@ ralph/scripts/ralph.sh --run <run_id> --tool claude 20   # 或 --tool codex（�
    - **记忆切片**：最近约 40 条 shared-memory 条目 + 该故事最近约 5 条进度记录。
 3. 在 worktree 里启动一个**全新的 agent 进程**（`claude --print …` 或 `codex exec …`，跳过权限确认——本循环就是为无人值守设计的）。没有聊天历史，没有上一轮迭代的上下文。
 4. agent 按手册行事：只实现**这一个故事**（只做 `Covers:` 指明的那一块），跑项目的质量检查（typecheck/lint/测试），把故事文件改为 `passes: true` 并写下 `notes`，用 `append-progress-json.sh` 追加结构化进度记录（一行 JSON 写进 `progress/<story_id>.jsonl`，可选 `--shared-memory` 沉淀可复用模式），最后以 `feat: [US-xxx] - [标题]` 提交全部变更。
+   每个 agent 回合都会收到统一的 **Round Commit Contract**：本轮产生的所有预期仓库产物必须在本轮结束前提交，不能留给后续 story、finalization、merge-back 或 consolidation 代为提交；若只形成了安全且完整的阶段性成果，则提交 checkpoint，但仍保持故事未完成。运行时 marker、临时诊断文件和无产物的幂等重试不要求空提交。
 5. 循环把故事状态同步回 `prd.json`（安全时 amend 进故事提交），并且**只认文件**：agent 光喊 `<promise>COMPLETE</promise>` 而 `passes` 仍是 `false`，只会得到一条警告，循环照常继续。
 6. 重复，直到所有故事通过，或达到 `max_iterations`（默认 10）。
 

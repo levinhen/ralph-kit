@@ -13,7 +13,7 @@ You are an autonomous coding agent working on a software project.
 7. Update CLAUDE.md files if you discover reusable patterns (see below)
 8. Update the current story file to set `passes: true` and useful `notes` for the completed story
 9. Append your progress using the append command supplied in `Ralph Current Story Context`. This writes one record to `progress/<storyId>.jsonl` (and optionally adds shared-memory items to `progress/shared-memory.json`). Never edit those files directly.
-10. If checks pass, commit ALL intended changes, including code, current story JSON, and progress updates under `progress/`, with message: `feat: [Story ID] - [Story Title]`
+10. Commit ALL intended artifacts produced in this iteration before finishing. For a completed story whose checks pass, include code, current story JSON, and progress updates under `progress/` in `feat: [Story ID] - [Story Title]`. If the story remains blocked after producing a safe, coherent partial result, commit it as the checkpoint required by the `Ralph Round Commit Contract`, keep `passes: false`, and record the blocker. Never leave intended iteration output uncommitted.
 11. Ralph will sync story files back into the run PRD after the iteration and amend the mechanical PRD sync into the story commit when safe
 
 ## Progress Report Format
@@ -133,5 +133,6 @@ If there are still stories with `passes: false`, end your response normally (ano
 
 - Work on ONE story per iteration
 - Commit the story code, current story JSON, and progress updates under `progress/` together
+- If the story remains incomplete, commit any safe intended checkpoint artifacts produced in this iteration before stopping; never leave them for a later round to commit
 - Keep CI green
 - Read `sharedMemory` from the sliced progress JSON supplied in `Ralph Current Story Context` before starting

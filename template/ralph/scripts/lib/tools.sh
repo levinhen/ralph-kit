@@ -48,6 +48,18 @@ make_prompt_with_run_context() {
 - Base repo root: \`$REPO_ROOT\`
 
 Use the story, PRD, and progress paths from this context for all Ralph state reads and writes. Do not fall back to \`ralph/prd.json\`, \`ralph/progress.txt\`, or any legacy \`ralph/progress.json\` when this context gives run-scoped paths.
+
+## Ralph Round Commit Contract
+
+Every Ralph agent invocation is one self-contained round. If this round creates or modifies any intended repository artifact, stage and commit that artifact during this same round before returning control to \`ralph.sh\`. Do not leave intended output for a later story, finalization round, merge-back round, or consolidation round to commit.
+
+- This contract applies to product code, tests, documentation, story state, PRD/progress records, merge resolutions, and design-ledger updates produced by the current round.
+- Before finishing, inspect \`git status --short\` and verify that every intended artifact produced by this round is included in a commit.
+- Never sweep unrelated pre-existing user changes into the round's commit. Leave them visible and report them separately.
+- Runtime completion markers and explicitly designated temporary/diagnostic files are control-plane state, not repository artifacts; follow the round-specific prompt about whether they must remain uncommitted.
+- Do not create an empty commit when the round produced no repository artifact or when an idempotent retry finds its artifacts already committed.
+- If the full task is blocked after producing a safe, coherent partial result, commit that result as \`chore(ralph): checkpoint $RUN_ID_LABEL <round>\`, keep the story/round incomplete, and describe the blocker in progress. Do not commit broken code or temporary experiments.
+- A round must not report success while any intended artifact it produced remains uncommitted.
 EOF
 }
 

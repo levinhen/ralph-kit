@@ -14,16 +14,17 @@ All user stories in the Ralph branch are already complete. Do not pick another u
 6. Include the completed Ralph state files that should live on the base branch, especially the PRD and progress paths supplied in `Ralph Run Context`.
 7. Do not stage unrelated pre-existing base worktree files unless they are intentionally part of the Ralph merge-back. Keep unrelated local files visible in the worktree and mention them if they remain after the merge commit.
 8. Run the appropriate quality checks for the files you changed.
-9. Stage resolved files and complete the merge with `git commit`, preserving the active merge parents.
+9. Append the required `MERGE-BACK` progress entry, stage every intended artifact produced by this round, and complete the merge with `git commit`, preserving the active merge parents. The progress entry and all merge resolutions from this round must be included in that merge commit; do not leave them for consolidation or a later retry to commit.
 10. Write the merge completion marker only after the merge commit succeeds, and do not include that marker file in the commit.
 
 ## Completion Requirements
 
 Before finishing successfully:
 
-1. Append a `MERGE-BACK` entry to the base branch progress path supplied in the merge-back context.
-2. Write the merge completion marker file specified in the run context.
-3. The marker file must contain exactly these lines:
+1. Verify the merge commit contains the `MERGE-BACK` entry and every intended merge artifact produced by this round.
+2. Run `git status --short` and verify that no intended round output remains uncommitted. Unrelated pre-existing base changes may remain visible; do not include them.
+3. Write the merge completion marker file specified in the run context.
+4. The marker file must contain exactly these lines:
 
 ```text
 status=done
@@ -31,7 +32,7 @@ base_branch=<base branch name>
 target_branch=<ralph branch name>
 ```
 
-4. Only after the marker file is written may you treat this round as complete.
+5. Only after the commit succeeds and the marker file is written may you treat this round as complete. The marker is runtime control state and must remain uncommitted.
 
 ## Background Processes
 

@@ -40,6 +40,8 @@ Do not pick another user story. Do not implement a new feature. Do not modify pr
 6. Stage and commit the ledger updates and PRD frontmatter together:
    - Commit message: `docs: consolidate <run-id> into design-ledger`
    - Include the ledger files and the source PRD frontmatter change. Do not include the consolidation marker file.
+   - Include every intended repository artifact produced by this consolidation round. Do not leave consolidation output for the archive step or a later retry to commit.
+   - Before writing the marker, run `git status --short` and verify that no intended consolidation artifact remains uncommitted. Unrelated pre-existing files may remain visible; do not include them.
 7. Write the consolidation completion marker at the path supplied in `Ralph Consolidation Context`. The marker file must contain exactly these lines:
 
    ```text

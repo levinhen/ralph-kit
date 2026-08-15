@@ -14,7 +14,7 @@ You are Codex running as an autonomous coding agent inside this repository.
 8. Update nearby `CLAUDE.md` files if you discover reusable patterns worth preserving.
 9. Update the current story file to set `passes: true` and useful `notes` for the completed story.
 10. Append a structured progress record using the append command supplied in `Ralph Current Story Context`. This writes one compact line to `progress/<storyId>.jsonl` and, when `--shared-memory` is given, merges entries into `progress/shared-memory.json`. Never edit those files directly.
-11. If checks pass, commit all intended changes, including code, the current story JSON, and progress updates under `progress/`, with message `feat: [Story ID] - [Story Title]`.
+11. Commit all intended artifacts produced in this iteration before finishing. For a completed story whose checks pass, include code, the current story JSON, and progress updates under `progress/` in `feat: [Story ID] - [Story Title]`. If the story remains blocked after producing a safe, coherent partial result, commit it as the checkpoint required by the `Ralph Round Commit Contract`, keep `passes: false`, and record the blocker. Never leave intended iteration output uncommitted.
 12. Ralph will sync story files back into the run PRD after the iteration and amend the mechanical PRD sync into the story commit when safe.
 13. Before you finish, verify in the story file itself that the story you just completed is now marked `passes: true` and `git status --short` is clean except ignored files.
 
@@ -103,7 +103,7 @@ NEVER leave a `npm run dev`, `vite`, `next dev`, watcher, or local server runnin
 - Work on one story per iteration.
 - Prefer fast codebase inspection before editing.
 - Use repository-local instructions as the source of truth when they conflict with generic habits.
-- Stop after one committed story, even if more stories remain.
+- Stop after one committed story, even if more stories remain. If the story could not complete, stop only after committing any safe intended checkpoint artifacts produced by the iteration.
 - Do not claim success unless the current story JSON and progress files under `progress/` were actually updated on disk and committed with the story.
 - Do not emit `<promise>COMPLETE</promise>` just because one story is done. Emit it only after Ralph has synced story files to the PRD and every story in the PRD path supplied in `Ralph Run Context` has `passes: true`.
 

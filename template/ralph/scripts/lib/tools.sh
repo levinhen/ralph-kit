@@ -127,8 +127,14 @@ run_selected_tool() {
   } &
   stream_pid="$!"
 
+  # The watchdog polls this file to decide whether the tool is wedged; the status
+  # row reads its mtime to show the same silence to the user while it builds.
+  ralph_progress_set_activity "$activity_file"
+
   start_tracked_process "$run_cwd" "$prompt_file" "$output_fifo" "${command_args[@]}"
   wait_for_active_tool "$activity_file" counter || tool_exit_code=$?
+
+  ralph_progress_set_activity ""
 
   finalize_tool_cleanup "$run_cwd"
 
@@ -144,6 +150,8 @@ run_selected_tool() {
     LAST_TOOL_SAW_COMPLETION="$(jq -r '.sawCompletion // false' "$summary_file" 2>/dev/null || echo "false")"
     stream_rate_limited="$(jq -r '.rateLimited // false' "$summary_file" 2>/dev/null || echo "false")"
     OUTPUT="$(jq -r '.assistantText // ""' "$summary_file" 2>/dev/null || echo "")"
+    # Fold this invocation into the run ledger before the scratch dir goes away.
+    ralph_usage_record "$summary_file" || true
   else
     echo "Warning: the $TOOL stream reader wrote no summary; treating this invocation as failed." >&2
     if [[ "$tool_exit_code" -eq 0 ]]; then

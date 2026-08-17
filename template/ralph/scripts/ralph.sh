@@ -105,6 +105,7 @@ source "$LIB_DIR/notify.sh"
 source "$LIB_DIR/sync.sh"
 source "$LIB_DIR/tools.sh"
 source "$LIB_DIR/story-state.sh"
+source "$LIB_DIR/usage.sh"
 source "$LIB_DIR/progress-bar.sh"
 source "$LIB_DIR/merge-back.sh"
 source "$LIB_DIR/consolidate.sh"
@@ -158,6 +159,10 @@ fi
 cleanup() {
   # Release the pinned row first so shutdown messages scroll normally.
   ralph_progress_stop || true
+  # The bill goes out on every exit path, including Ctrl-C: an interrupted run
+  # still spent the tokens, and this is the last chance to say how many.
+  ralph_usage_report || true
+  ralph_usage_stop || true
   terminate_active_tool || true
   # The stream reader is not killed here: closing the tool also closes the FIFO
   # writer, so it reaches EOF on its own. Only its scratch dir needs clearing.
@@ -435,7 +440,18 @@ fi
 
 echo "Starting Ralph - Tool: $TOOL - Max iterations: $MAX_ITERATIONS"
 echo "Tool guard: timeout=${RALPH_TOOL_TIMEOUT_SECONDS:-0}s idle=${RALPH_TOOL_IDLE_TIMEOUT_SECONDS:-360}s"
-ralph_progress_start "$PRD_FILE" "$MAX_ITERATIONS"
+# The ledger has to exist before the status ticker forks: the ticker inherits
+# the path and then polls the file for the run's running total.
+ralph_usage_start
+
+# What to call this run in the status row. Parallel runs (see orchestrate.sh) put
+# otherwise identical rows in several windows, and the run id is what tells them
+# apart; a legacy run has none, so its branch is the next best handle.
+PROGRESS_LABEL="$RUN_ID"
+if [[ -z "$PROGRESS_LABEL" && -n "$TARGET_BRANCH" ]]; then
+  PROGRESS_LABEL="${TARGET_BRANCH##*/}"
+fi
+ralph_progress_start "$PRD_FILE" "$MAX_ITERATIONS" "$PROGRESS_LABEL"
 
 for i in $(seq 1 $MAX_ITERATIONS); do
   sync_story_files_to_prd

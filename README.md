@@ -129,7 +129,39 @@ ralph/scripts/ralph.sh --run <run_id> --tool claude 20   # or --tool codex (defa
 5. The loop syncs story state back into `prd.json` (amending it into the story commit when safe) and **trusts only the file**: an agent claiming `<promise>COMPLETE</promise>` while `passes` is still `false` gets a warning, and the loop continues.
 6. Repeat until all stories pass or `max_iterations` (default 10) is reached.
 
-Interactive terminals keep a progress bar pinned to the bottom row with the completed-story count, current US, phase, time spent in that phase, and iteration while agent logs scroll above it. A background ticker redraws it every `RALPH_PROGRESS_TICK_SECONDS` (default 2) so the clock keeps moving while an agent is silent, and it restores the terminal on its own if Ralph is killed outright. It disables itself when output is redirected (including parallel orchestrator logs) — control codes only ever go to `/dev/tty`, never into a log; set `RALPH_PROGRESS=0` to turn it off explicitly.
+Interactive terminals keep a progress bar pinned to the bottom row while agent logs scroll above it:
+
+```
+Ralph:20260817-a [█████░░░░░░░░░░░] 3/8 done | US-004 | working 4m12s | iter 7/30 | total 1h06m | eta ~2h45m | ~$4.18 | 3.7M tok | Add token accounting
+```
+
+Segments are added in priority order and the row degrades from the right as the terminal narrows, so a 40-column window still shows the bar and the current story. The run id (or branch, in legacy mode) appears from 90 columns up — it is what tells parallel runs apart when several orchestrator windows are open.
+
+Two of the segments only appear when they have something to say:
+
+- **`idle 2m05s/6m00s`** turns the whole row yellow once the agent has been silent for `RALPH_PROGRESS_IDLE_MIN` seconds (default 30), counting up to the idle timeout that will kill the invocation. Without it a long test run and a wedged CLI look identical — the phase clock advances the same way in both.
+- **`eta ~2h45m`** extrapolates from the stories *this* run completed, so resuming a half-finished run does not divide the elapsed time by someone else's work. Merge-back and consolidation rounds are not stories, so it drifts near the end of a run; hence the tilde.
+
+A background ticker redraws it every `RALPH_PROGRESS_TICK_SECONDS` (default 2) so the clocks keep moving while an agent is silent, and it restores the terminal on its own if Ralph is killed outright. It disables itself when output is redirected (including parallel orchestrator logs) — control codes only ever go to `/dev/tty`, never into a log; set `RALPH_PROGRESS=0` to turn it off explicitly.
+
+### Token and cost accounting
+
+Ralph normalises the usage each agent CLI reports and sums it across the run. Both the running total in the status row and the closing bill on stdout come from the same ledger, so it is also there for non-interactive runs where the pinned row is off:
+
+```
+Ralph usage for this run:
+  Tool calls:    12
+  Model:         gpt-5.6-sol
+  Input:         412000 (new) + 3140000 (cache read) + 88000 (cache write)
+  Output:        61000
+  Total tokens:  3701000
+  Cost:          ~$4.18 (estimated at 5/0.5/6.25/30 USD per 1M in/cached/write/out)
+```
+
+Where the money comes from depends on the tool, and the row marks the difference — `$4.18` is a bill, `~$4.18` is an estimate:
+
+- **claude** reports `total_cost_usd` itself, so Ralph uses the CLI's own number and never prices it. On a subscription plan that figure is API-equivalent pricing, not what you are actually charged.
+- **codex** reports tokens but no cost, so Ralph prices it from a rate table. The defaults are the gpt-5.6-sol standard tier ($5 input, $0.50 cached input, $6.25 cache writes, $30 output per 1M tokens); override them if you run a different model. Prompts over 272K input tokens bill at a higher long-context tier that the event stream does not expose per request, so a run that lives there is under-counted unless you raise the rates.
 
 Guard rails: a per-invocation idle timeout (default 360 s of silence) and optional hard timeout; a dedicated exit code (75) that aborts the whole loop on provider rate limits; and a post-invocation process-tree sweep that reaps leftover dev servers/watchers (including Windows Git Bash handling). Codex runs with `--json` while preserving its normal session: Ralph parses JSONL directly from a pipe, keeps only the latest 100 events in an in-memory ring, and writes those raw events to a temporary diagnostic file only when the invocation fails.
 
@@ -186,6 +218,10 @@ Lists incomplete runs, numbers them, and executes a staged plan: `,` = parallel 
 | `RALPH_TOOL_TIMEOUT_SECONDS` | `0` (off) | hard cap per invocation |
 | `RALPH_SHARED_MEMORY_ITEMS` / `RALPH_STORY_PROGRESS_RECORDS` | `40` / `5` | prompt memory slice sizes |
 | `RALPH_PROGRESS` | `1` | pinned story progress in interactive terminals; set to `0` to disable |
+| `RALPH_PROGRESS_IDLE_MIN` | `30` | seconds of agent silence before the idle clock appears |
+| `RALPH_PRICE_INPUT_USD` / `RALPH_PRICE_CACHED_INPUT_USD` | `5` / `0.5` | USD per 1M tokens, used to estimate codex cost |
+| `RALPH_PRICE_CACHE_WRITE_USD` / `RALPH_PRICE_OUTPUT_USD` | `6.25` / `30` | USD per 1M tokens, used to estimate codex cost |
+| `RALPH_PRICE_MODEL` | `gpt-5.6-sol` | model label shown next to an estimated cost |
 | `RALPH_NOTIFY` / `RALPH_NOTIFY_SOUND` | `1` | desktop notifications |
 | `RALPH_PLAN` | — | default plan for `orchestrate.sh` |
 

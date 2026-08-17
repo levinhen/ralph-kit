@@ -127,7 +127,39 @@ ralph/scripts/ralph.sh --run <run_id> --tool claude 20   # 或 --tool codex（�
 5. 循环把故事状态同步回 `prd.json`（安全时 amend 进故事提交），并且**只认文件**：agent 光喊 `<promise>COMPLETE</promise>` 而 `passes` 仍是 `false`，只会得到一条警告，循环照常继续。
 6. 重复，直到所有故事通过，或达到 `max_iterations`（默认 10）。
 
-交互式终端的最底部会常驻一条进度栏，显示已完成故事数、当前 US、所处阶段、该阶段已耗时和迭代次数；上方的 agent 日志照常滚动。后台心跳每 `RALPH_PROGRESS_TICK_SECONDS` 秒（默认 2）重绘一次，因此 agent 静默时计时仍在走；Ralph 被强杀时它也会自行恢复终端。输出被重定向到文件（包括并行编排日志）时会自动关闭——控制码只写 `/dev/tty`，绝不会进日志；设置 `RALPH_PROGRESS=0` 也可手动关闭。
+交互式终端的最底部会常驻一条进度栏，上方的 agent 日志照常滚动：
+
+```
+Ralph:20260817-a [█████░░░░░░░░░░░] 3/8 done | US-004 | working 4m12s | iter 7/30 | total 1h06m | eta ~2h45m | ~$4.18 | 3.7M tok | 补齐成本统计
+```
+
+各段按优先级依次追加，终端越窄就从右侧越先脱落，因此 40 列的窗口里仍能看到进度条和当前故事。run id（legacy 模式下为分支名）从 90 列起显示——并行编排开多个窗口时，它是区分各个 run 的唯一标识。
+
+其中两段只在有话可说时才出现：
+
+- **`idle 2m05s/6m00s`**：agent 静默超过 `RALPH_PROGRESS_IDLE_MIN` 秒（默认 30）后出现，整行转为黄色，并一直数到会终止本次调用的空闲超时。没有它的话，一个跑了 5 分钟的测试和一个已经卡死的 CLI 看起来完全一样——阶段计时在两种情况下都照走。
+- **`eta ~2h45m`**：只按**本次运行**完成的故事外推，因此续跑一个半成品 run 时，不会拿已耗时去除以上一次运行的成果。merge-back 和 consolidation 轮不算故事，所以临近收尾时估算会漂——这就是那个波浪号的含义。
+
+后台心跳每 `RALPH_PROGRESS_TICK_SECONDS` 秒（默认 2）重绘一次，因此 agent 静默时计时仍在走；Ralph 被强杀时它也会自行恢复终端。输出被重定向到文件（包括并行编排日志）时会自动关闭——控制码只写 `/dev/tty`，绝不会进日志；设置 `RALPH_PROGRESS=0` 也可手动关闭。
+
+### Token 与成本统计
+
+Ralph 会把两个 agent CLI 各自上报的用量归一化，并在整个 run 内累加。进度栏里的实时总计和结束时打印在 stdout 上的账单出自同一份账本，所以进度栏关闭的非交互运行同样能拿到：
+
+```
+Ralph usage for this run:
+  Tool calls:    12
+  Model:         gpt-5.6-sol
+  Input:         412000 (new) + 3140000 (cache read) + 88000 (cache write)
+  Output:        61000
+  Total tokens:  3701000
+  Cost:          ~$4.18 (estimated at 5/0.5/6.25/30 USD per 1M in/cached/write/out)
+```
+
+金额从哪儿来取决于所用工具，进度栏也会把两者区分开——`$4.18` 是账单，`~$4.18` 是估算：
+
+- **claude** 自己上报 `total_cost_usd`，因此 Ralph 直接采用 CLI 给出的数字，不自行计价。订阅制账户下这个数字是等价 API 价格，并非实际扣费。
+- **codex** 只报 token 不报金额，因此 Ralph 按价格表估算。默认值为 gpt-5.6-sol 标准档（每百万 token：输入 $5、缓存命中 $0.50、缓存写入 $6.25、输出 $30）；换模型时请自行覆盖。输入超过 272K 的请求走更贵的长上下文档，而事件流并不逐请求暴露这一点，因此长期处于该档的 run 会被低估，除非你调高上述价格。
 
 防护措施：单次调用的空闲超时（默认静默 360 秒即终止）和可选的硬超时；命中限流时以专用退出码 75 中止整个循环；每次调用后清扫进程树，回收残留的 dev server / watcher（含 Windows Git Bash 的特殊处理）。Codex 使用 `--json` 且保留正常 session：Ralph 直接从管道实时解析 JSONL，只在内存环形缓冲中保留最近 100 条事件；仅当本次调用失败时，才把这些原始事件写入临时诊断文件。
 
@@ -184,6 +216,10 @@ ralph/scripts/orchestrate.sh --tool claude --plan "1 > 2,3 > 4"
 | `RALPH_TOOL_TIMEOUT_SECONDS` | `0`（关闭） | 单次调用硬上限 |
 | `RALPH_SHARED_MEMORY_ITEMS` / `RALPH_STORY_PROGRESS_RECORDS` | `40` / `5` | prompt 记忆切片大小 |
 | `RALPH_PROGRESS` | `1` | 交互式终端底部的常驻故事进度栏；设为 `0` 关闭 |
+| `RALPH_PROGRESS_IDLE_MIN` | `30` | agent 静默多少秒后显示空闲计时 |
+| `RALPH_PRICE_INPUT_USD` / `RALPH_PRICE_CACHED_INPUT_USD` | `5` / `0.5` | 每百万 token 美元单价，用于估算 codex 成本 |
+| `RALPH_PRICE_CACHE_WRITE_USD` / `RALPH_PRICE_OUTPUT_USD` | `6.25` / `30` | 每百万 token 美元单价，用于估算 codex 成本 |
+| `RALPH_PRICE_MODEL` | `gpt-5.6-sol` | 估算成本时显示的模型标签 |
 | `RALPH_NOTIFY` / `RALPH_NOTIFY_SOUND` | `1` | 桌面通知 |
 | `RALPH_PLAN` | — | `orchestrate.sh` 的默认计划 |
 

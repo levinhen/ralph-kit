@@ -153,7 +153,6 @@ function summarize(counts) {
   if (counts.updated)        parts.push(green(`${counts.updated} updated`));
   if (counts.identical)      parts.push(dim(`${counts.identical} unchanged`));
   if (counts.conflicts)      parts.push(yellow(`${counts.conflicts} conflict`));
-  if (counts.backedUp)       parts.push(yellow(`${counts.backedUp} backed up`));
   return parts.join(', ') || 'nothing to do';
 }
 
@@ -197,7 +196,7 @@ function tryCommitGeneratedFiles(target, generatedFiles, mode) {
 function cmdInit(target) {
   console.log(bold(`ralph-kit ${VERSION}`) + ` → init ${target}`);
   const files = planFiles(target);
-  const counts = { created: 0, updated: 0, identical: 0, conflicts: 0, backedUp: 0 };
+  const counts = { created: 0, updated: 0, identical: 0, conflicts: 0 };
   const conflicts = [];
   const generatedFiles = [];
 
@@ -234,7 +233,7 @@ function cmdInit(target) {
     console.log('');
     console.log(yellow('Conflicting files (kept your version, did not overwrite):'));
     for (const f of conflicts) console.log('  ' + f);
-    console.log(dim('  Run `ralph-kit sync` to back them up and apply the kit version.'));
+    console.log(dim('  Run `ralph-kit sync` to replace them with the kit version.'));
   }
   if (agents.action === 'skipped-existing') {
     console.log('');
@@ -248,8 +247,7 @@ function cmdInit(target) {
 function cmdSync(target) {
   console.log(bold(`ralph-kit ${VERSION}`) + ` → sync ${target}`);
   const files = planFiles(target);
-  const counts = { created: 0, updated: 0, identical: 0, conflicts: 0, backedUp: 0 };
-  const backedUp = [];
+  const counts = { created: 0, updated: 0, identical: 0, conflicts: 0 };
   const generatedFiles = [];
 
   for (const rel of files) {
@@ -266,13 +264,9 @@ function cmdSync(target) {
       counts.identical++;
       continue;
     }
-    // Differs — back up then overwrite.
-    const bak = dst + '.ralph-kit.bak';
-    copyFileSync(dst, bak);
+    // Differs — replace the target with the kit version.
     copyOne(src, dst);
-    generatedFiles.push(dst, bak);
-    backedUp.push(rel);
-    counts.backedUp++;
+    generatedFiles.push(dst);
     counts.updated++;
   }
 
@@ -287,12 +281,6 @@ function cmdSync(target) {
   tryCommitGeneratedFiles(target, generatedFiles, 'sync');
 
   console.log(summarize(counts));
-  if (backedUp.length) {
-    console.log('');
-    console.log(yellow('Backed up files with local changes (.ralph-kit.bak):'));
-    for (const f of backedUp) console.log('  ' + f);
-    console.log(dim('  Diff each against the new version, then delete the .bak when satisfied.'));
-  }
 }
 
 function cmdDoctor(target) {
@@ -329,7 +317,7 @@ function cmdDoctor(target) {
   if (drifted.length) {
     console.log(yellow(`${drifted.length} files differ from the kit (local edits or stale version):`));
     for (const f of drifted) console.log('  ' + f);
-    console.log(dim('  Run `ralph-kit sync` to update (your version will be backed up as .ralph-kit.bak).'));
+    console.log(dim('  Run `ralph-kit sync` to replace them with the kit version.'));
   }
   if (!missing.length && !drifted.length) {
     console.log(green('clean — project matches the kit exactly.'));
@@ -343,9 +331,8 @@ Install / sync the Ralph autonomous-agent loop into a project.
 Usage:
   ralph-kit init    [target]   Install the kit into <target> (default: cwd).
                                Existing files are NEVER overwritten.
-  ralph-kit sync    [target]   Update an installed kit. Locally-changed files
-                               are backed up as <file>.ralph-kit.bak before
-                               being replaced with the kit version.
+  ralph-kit sync    [target]   Update an installed kit, replacing locally-changed
+                               managed files with the kit version.
   ralph-kit doctor  [target]   Report installed version, missing files, and
                                files that differ from the kit.
 

@@ -257,7 +257,7 @@ npx github:levinhen/ralph-kit doctor
 
 - **目标不存在** → 写入。
 - **目标与模板完全一致** → 跳过（幂等）。
-- **目标与模板不同** → `init` 跳过并警告；`sync` 先把现有文件备份为 `<file>.ralph-kit.bak` 再写入新版本。
+- **目标与模板不同** → `init` 跳过并警告；`sync` 直接用 kit 版本覆盖。
 
 随时运行 `ralph-kit doctor` 查看漂移情况。
 

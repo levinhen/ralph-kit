@@ -262,7 +262,7 @@ For every other file:
 
 - **Target missing** → write.
 - **Target identical to template** → skip (idempotent).
-- **Target differs from template** → `init` skips and warns. `sync` backs up the existing file as `<file>.ralph-kit.bak` then writes the new version.
+- **Target differs from template** → `init` skips and warns. `sync` replaces it with the kit version.
 
 Run `ralph-kit doctor` any time to see drift.
 

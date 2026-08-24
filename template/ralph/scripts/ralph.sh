@@ -566,7 +566,7 @@ EOF
 - Design ledger root: \`docs/design-ledger/\` (create the directory if missing)
 - Consolidation marker path (write this last, do NOT commit it): \`$CONSOLIDATION_STATE_REL_PATH\`
 
-After consolidation, \`ralph.sh\` will mechanically move \`ralph/runs/$RUN_ID/\` to \`ralph/archive/<date>-$RUN_ID/\` and create a separate archive commit. Do not do the archive move yourself.
+After consolidation, \`ralph.sh\` will mechanically move \`ralph/runs/$RUN_ID/\` to \`ralph/archive/<date>-$RUN_ID/\`, move \`ralph/tasks/prd-$RUN_ID.md\` into that same archive dir, and create a separate archive commit. Do not do either move yourself — leave the source PRD in \`ralph/tasks/\` with its updated frontmatter.
 EOF
 
       run_selected_tool "$REPO_ROOT" "$CONSOLIDATE_PROMPT_FILE"

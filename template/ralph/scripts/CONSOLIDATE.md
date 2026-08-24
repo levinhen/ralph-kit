@@ -37,6 +37,8 @@ Do not pick another user story. Do not implement a new feature. Do not modify pr
    ```
 
    Preserve the existing markdown body untouched. Do not rewrite the body. If frontmatter already exists, update fields in place.
+
+   Leave the file at `ralph/tasks/prd-<run-id>.md`. After this round, `ralph.sh` archives it mechanically alongside the run dir — do not move or delete it yourself.
 6. Stage and commit the ledger updates and PRD frontmatter together:
    - Commit message: `docs: consolidate <run-id> into design-ledger`
    - Include the ledger files and the source PRD frontmatter change. Do not include the consolidation marker file.

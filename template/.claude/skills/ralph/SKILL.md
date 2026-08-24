@@ -368,11 +368,11 @@ Add ability to mark tasks with different statuses.
 2. If the run directory exists for the same feature, update it only if the user asked to revise that run.
 3. If the run directory exists for a different feature, choose a different `run_id` instead of overwriting it.
 4. Do not use root-level `ralph/prd.json` for new runs unless the user explicitly asks for legacy mode.
-5. Also check `ralph/archive/` — a completed run with the same `run_id` may already be archived (folder name `<date>-<run_id>`). If so, pick a fresh `run_id` (e.g., append a suffix) rather than reviving an archived run.
+5. Also check `ralph/archive/` — a completed run with the same `run_id` may already be archived (folder name `<date>-<run_id>`, holding the run dir contents plus the source `prd-<run_id>.md`). If so, pick a fresh `run_id` (e.g., append a suffix) rather than reviving an archived run.
 
 ## Working with Merged PRDs
 
-If the source PRD has `status: merged` frontmatter, it has already been distilled into `docs/design-ledger/<area>.md` and Ralph already ran it. Before converting:
+If the source PRD has `status: merged` frontmatter (such PRDs live under `ralph/archive/<date>-<run_id>/`, not `ralph/tasks/`), it has already been distilled into `docs/design-ledger/<area>.md` and Ralph already ran it. Before converting:
 
 1. Tell the user the PRD is marked merged and ask whether they want to:
    - Pick a different PRD,

@@ -27,7 +27,8 @@ Create detailed Product Requirements Documents that are clear, actionable, and s
 **Important:** Do NOT start implementing. Just create the PRD.
 
 If the user also wants the PRD prepared for Ralph execution, use the `ralph` skill after saving the markdown PRD. The
-markdown task remains in `ralph/tasks/`, while the Ralph execution file should be generated as
+markdown task remains in `ralph/tasks/` while the run is in play (Ralph archives it into
+`ralph/archive/<date>-<run_id>/` once the run completes), while the Ralph execution file should be generated as
 `ralph/runs/<run_id>/prd.json`. The Ralph skill/script owns run-scoped execution state such as
 `progress/shared-memory.json`, per-story `progress/<story_id>.jsonl`, `state.json`, and per-story `stories/*.json`.
 
@@ -219,7 +220,7 @@ The PRD reader may be a junior developer or AI agent. Therefore:
 ## Output
 
 - **Format:** Markdown (`.md`)
-- **Location:** `ralph/tasks/`
+- **Location:** `ralph/tasks/` (moved into `ralph/archive/<date>-<run_id>/` when the matching Ralph run finishes)
 - **Filename:** `prd-<feature-name>.md` (kebab-case)
 - **Ralph handoff:** Only when requested, also create `ralph/runs/<run_id>/prd.json` through the `ralph` skill.
 

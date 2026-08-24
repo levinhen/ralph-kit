@@ -13,9 +13,9 @@
 .claude/skills/ralph/SKILL.md # /ralph 斜杠命令
 ralph/
   scripts/                    # 静态循环代码（ralph.sh、orchestrate.sh、lib/、agent 提示词）
-  tasks/                      # /prd 写出的 PRD markdown（首次使用时创建；安装器永不触碰）
+  tasks/                      # 进行中的 run 的 PRD markdown（首次使用时创建；安装器永不触碰）
   runs/                       # 进行中的运行（运行时创建，不随包分发）
-  archive/                    # 已完成并沉淀的运行（运行时创建）
+  archive/                    # 已完成并沉淀的运行 + 其源 PRD markdown（运行时创建）
   locks/                      # 运行时锁目录（运行时创建）
 AGENTS.md                     # （创建或追加标记段；已有内容保留）
 ```
@@ -61,7 +61,8 @@ merge-back 回合      git merge --no-ff 合回基线分支
 consolidation 回合   沉淀运行学到的设计 → docs/design-ledger/
         │
         ▼
-归档                 ralph/runs/<id> → ralph/archive/<date>-<id>
+归档                 ralph/runs/<id> + ralph/tasks/prd-<id>.md
+                     → ralph/archive/<date>-<id>
 ```
 
 ### 阶段 1 —— 规划：`/prd` 产出人类可读的 PRD
@@ -180,7 +181,7 @@ Ralph usage for this run:
 1. 通读本次 run 的全部产出——`prd.json`、故事文件、`progress/*.jsonl`。
 2. 把"**设计现在是什么样**"蒸馏进 `docs/design-ledger/<area>.md`（每个受影响的代码区域一个文件）。ledger 是"X 现在是怎么工作的"的权威答案——未来的 agent 读它，而不是去翻历史 PRD。
 3. 给源 PRD `ralph/tasks/prd-<run_id>.md` 加上 `status: merged` frontmatter，指向对应的 ledger 文件。
-4. 写入 consolidation 标记；随后 `ralph.sh` 机械地把 `ralph/runs/<run_id>/` 移到 `ralph/archive/<date>-<run_id>/` 并提交这次移动。
+4. 写入 consolidation 标记；随后 `ralph.sh` 机械地把 `ralph/runs/<run_id>/` 和源 PRD `ralph/tasks/prd-<run_id>.md` 一起移到 `ralph/archive/<date>-<run_id>/`，并把这次移动提交成一个单独的归档提交。`ralph/tasks/` 因此只保留还在进行中的 PRD，已完成的 run 与它的 PRD 文档留在同一个归档目录里。
 
 循环以退出码 0 结束，并发送桌面通知。
 
@@ -248,7 +249,7 @@ npx github:levinhen/ralph-kit doctor
 
 - `ralph/tasks/` —— `/prd` 技能写出的 PRD markdown
 - `ralph/runs/` —— 进行中的 Ralph run
-- `ralph/archive/` —— 已完成/已沉淀的 run
+- `ralph/archive/` —— 已完成/已沉淀的 run 及其源 PRD markdown
 - `ralph/locks/` —— 运行时锁目录
 - `ralph/progress/`、`ralph/stories/`、`ralph/prd.json`、`ralph/progress.txt`、`ralph/state.json`、`ralph/.last-branch`、`ralph/.merge-back-done` —— legacy 模式的运行时文件
 - 已存在的 `AGENTS.md` —— 片段会打印出来，由你自行粘贴

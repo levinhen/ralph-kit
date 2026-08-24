@@ -4,7 +4,7 @@ English | [简体中文](./README.zh-CN.md)
 
 One-command installer for the [Ralph](https://github.com/snarktank/ralph) autonomous-agent loop, packaged with companion `/prd` and `/ralph` skills for both Claude Code (`.claude/skills/`) and Codex (`.agents/skills/`), plus `AGENTS.md` integration.
 
-The whole idea in one paragraph: **you describe a feature in chat; it becomes a PRD you review; the PRD is split into small, verifiable user stories; a shell loop then spawns one fresh AI agent per story inside an isolated git worktree — each implements, checks, and commits its slice — until every story passes; the branch is merged back into your base branch, the run's design decisions are distilled into a long-lived design ledger, and the run directory is archived.** Files are the memory, git is the checkpoint, and every agent invocation starts from a clean context window.
+The whole idea in one paragraph: **you describe a feature in chat; it becomes a PRD you review; the PRD is split into small, verifiable user stories; a shell loop then spawns one fresh AI agent per story inside an isolated git worktree — each implements, checks, and commits its slice — until every story passes; the branch is merged back into your base branch, the run's design decisions are distilled into a long-lived design ledger, and the run directory is archived together with its PRD.** Files are the memory, git is the checkpoint, and every agent invocation starts from a clean context window.
 
 Drops the following into any project:
 
@@ -15,9 +15,9 @@ Drops the following into any project:
 .agents/skills/ralph/SKILL.md # /ralph skill (Codex — same content)
 ralph/
   scripts/                    # static loop code (ralph.sh, orchestrate.sh, lib/, agent prompts)
-  tasks/                      # PRD markdown authored via /prd (created on first use; never touched)
+  tasks/                      # PRD markdown for runs still in play (created on first use; never touched)
   runs/                       # active runs (created at runtime, not shipped)
-  archive/                    # completed-and-consolidated runs (created at runtime)
+  archive/                    # completed-and-consolidated runs + their source PRDs (created at runtime)
   locks/                      # runtime lock dirs (created at runtime)
 AGENTS.md                     # (created or annotated; existing content preserved)
 ```
@@ -63,7 +63,8 @@ merge-back round     git merge --no-ff into the base branch
 consolidation round  distill learnings → docs/design-ledger/
         │
         ▼
-archive              ralph/runs/<id> → ralph/archive/<date>-<id>
+archive              ralph/runs/<id> + ralph/tasks/prd-<id>.md
+                     → ralph/archive/<date>-<id>
 ```
 
 ### Stage 1 — Plan: `/prd` writes a human-readable PRD
@@ -182,7 +183,7 @@ One more agent round (`CONSOLIDATE.md`) runs on the base branch:
 1. Read everything the run produced — `prd.json`, story files, `progress/*.jsonl`.
 2. Distill **what the design IS NOW** into `docs/design-ledger/<area>.md` (one file per affected codebase area). The ledger is the authoritative answer to "how does X work today?" — future agents read it instead of mining historical PRDs.
 3. Mark the source PRD `ralph/tasks/prd-<run_id>.md` with `status: merged` frontmatter pointing at the ledger files.
-4. Write the consolidation marker; `ralph.sh` then mechanically moves `ralph/runs/<run_id>/` → `ralph/archive/<date>-<run_id>/` and commits the move.
+4. Write the consolidation marker; `ralph.sh` then mechanically moves both `ralph/runs/<run_id>/` and the source PRD `ralph/tasks/prd-<run_id>.md` into `ralph/archive/<date>-<run_id>/`, and commits that move as a separate archive commit. `ralph/tasks/` is left holding only PRDs still in play, while a finished run and its PRD sit in one archive directory.
 
 The loop exits 0 and sends a desktop notification.
 
@@ -253,7 +254,7 @@ silently ignored and never make the command fail.
 
 - `ralph/tasks/` — PRD markdown authored by the `/prd` skill
 - `ralph/runs/` — in-progress Ralph runs
-- `ralph/archive/` — completed/consolidated runs
+- `ralph/archive/` — completed/consolidated runs and their source PRDs
 - `ralph/locks/` — runtime lock directories
 - `ralph/progress/`, `ralph/stories/`, `ralph/prd.json`, `ralph/progress.txt`, `ralph/state.json`, `ralph/.last-branch`, `ralph/.merge-back-done` — legacy-mode runtime files
 - An existing `AGENTS.md` — the snippet is printed for you to paste

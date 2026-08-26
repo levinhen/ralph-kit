@@ -117,4 +117,4 @@ If all stories are complete, reply with exactly:
 <promise>COMPLETE</promise>
 ```
 
-Otherwise end normally so the outer loop can start the next iteration.
+If the current story remains `passes: false`, end with a clear blocker summary. Ralph will run one read-only failure diagnosis round and then stop for human review; it will not retry this implementation automatically. If the current story is complete but other stories remain, end normally so the outer loop can start the next story.

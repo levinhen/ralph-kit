@@ -66,6 +66,7 @@ EOF
 run_selected_tool() {
   local run_cwd="$1"
   local prompt_file="$2"
+  local access_mode="${3:-write}"
   local stream_state_dir=""
   local activity_file=""
   local summary_file=""
@@ -86,19 +87,39 @@ run_selected_tool() {
 
   node_bin="$(require_tool_command node node node.exe)" || return $?
 
+  if [[ "$access_mode" != "write" && "$access_mode" != "read-only" ]]; then
+    echo "Error: Invalid Ralph tool access mode '$access_mode'." >&2
+    return 1
+  fi
+
   if [[ "$TOOL" == "claude" ]]; then
     tool_bin="$(require_tool_command "$TOOL" claude claude.cmd)" || return $?
-    command_args=("$tool_bin" --dangerously-skip-permissions --print --verbose --output-format stream-json)
+    if [[ "$access_mode" == "read-only" ]]; then
+      command_args=("$tool_bin" --permission-mode plan --print --verbose --output-format stream-json)
+    else
+      command_args=("$tool_bin" --dangerously-skip-permissions --print --verbose --output-format stream-json)
+    fi
   else
     LAST_MESSAGE_FILE=$(mktemp)
     tool_bin="$(require_tool_command "$TOOL" codex codex.cmd)" || return $?
-    command_args=("$tool_bin" exec \
-      --cd "$run_cwd" \
-      --dangerously-bypass-approvals-and-sandbox \
-      --skip-git-repo-check \
-      --json \
-      --output-last-message "$LAST_MESSAGE_FILE" \
-      -)
+    if [[ "$access_mode" == "read-only" ]]; then
+      command_args=("$tool_bin" exec \
+        --cd "$run_cwd" \
+        --sandbox read-only \
+        --config 'approval_policy="never"' \
+        --skip-git-repo-check \
+        --json \
+        --output-last-message "$LAST_MESSAGE_FILE" \
+        -)
+    else
+      command_args=("$tool_bin" exec \
+        --cd "$run_cwd" \
+        --dangerously-bypass-approvals-and-sandbox \
+        --skip-git-repo-check \
+        --json \
+        --output-last-message "$LAST_MESSAGE_FILE" \
+        -)
+    fi
   fi
 
   stream_state_dir=$(mktemp -d "${TMPDIR:-/tmp}/ralph-stream.XXXXXX")
@@ -214,9 +235,9 @@ run_selected_tool() {
   return 0
 }
 
-# Ralph's loop is meant to survive a bad iteration, so one failure only warns.
-# A broken setup fails every iteration though, and without a counter that burns
-# the entire run against the API for nothing.
+# Most dedicated phases can retry a transient tool failure. Story rounds set
+# DEFER_TOOL_FAILURE_STOP because an incomplete story is handled immediately by
+# the final diagnosis round instead of another implementation attempt.
 record_tool_outcome() {
   local limit="${RALPH_MAX_CONSECUTIVE_FAILURES:-3}"
 
@@ -228,6 +249,11 @@ record_tool_outcome() {
   fi
 
   CONSECUTIVE_TOOL_FAILURES=$((${CONSECUTIVE_TOOL_FAILURES:-0} + 1))
+
+  if [[ "${DEFER_TOOL_FAILURE_STOP:-false}" == "true" ]]; then
+    echo "Ralph tool failure $CONSECUTIVE_TOOL_FAILURES/$limit; deferring failure handling to the current story controller." >&2
+    return 0
+  fi
 
   if [[ "$limit" -gt 0 && "$CONSECUTIVE_TOOL_FAILURES" -ge "$limit" ]]; then
     echo ""

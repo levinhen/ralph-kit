@@ -284,12 +284,17 @@ ralph_progress_render() {
   case "$phase" in
     working) phase_label="working" ;;
     checking) phase_label="checking" ;;
+    diagnosing) phase_label="diagnosing failure" ;;
     finalizing) phase_label="finalizing worktree" ;;
     merge-back) phase_label="merge-back" ;;
     consolidating) phase_label="consolidating" ;;
     complete) phase_label="complete" ;;
     *) phase_label="starting" ;;
   esac
+
+  if [[ "$phase" == "diagnosing" ]]; then
+    color="1;33"
+  fi
 
   now=$(date +%s 2>/dev/null || echo 0)
   [[ "$now" =~ ^[0-9]+$ ]] || now=0

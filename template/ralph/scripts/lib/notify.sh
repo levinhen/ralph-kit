@@ -195,7 +195,8 @@ notify_ralph_stories_completed() {
 }
 
 notify_ralph_needs_attention() {
-  notify_ralph "Ralph needs attention" "run $RUN_ID_LABEL: reached max iterations ($MAX_ITERATIONS)"
+  local reason="${1:-reached max iterations ($MAX_ITERATIONS)}"
+  notify_ralph "Ralph needs attention" "run $RUN_ID_LABEL: $reason"
 }
 
 notify_ralph_rate_limited() {

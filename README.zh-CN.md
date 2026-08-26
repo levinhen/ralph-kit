@@ -50,6 +50,7 @@ ralph/runs/<run_id>/prd.json          机器可读的运行定义
         │    3. 启动全新的 claude / codex 进程
         │    4. agent：实现 → 质量检查 → passes=true → 提交
         │    5. 把故事状态同步回 prd.json
+        │       passes!=true → 只读失败诊断轮 → 输出终端 → 停止
         ▼
 所有故事 passes=true
         │
@@ -125,8 +126,9 @@ ralph/scripts/ralph.sh --run <run_id> --tool claude 20   # 或 --tool codex（�
 3. 在 worktree 里启动一个**全新的 agent 进程**（`claude --print …` 或 `codex exec …`，跳过权限确认——本循环就是为无人值守设计的）。没有聊天历史，没有上一轮迭代的上下文。
 4. agent 按手册行事：只实现**这一个故事**（只做 `Covers:` 指明的那一块），跑项目的质量检查（typecheck/lint/测试），把故事文件改为 `passes: true` 并写下 `notes`，用 `append-progress-json.sh` 追加结构化进度记录（一行 JSON 写进 `progress/<story_id>.jsonl`，可选 `--shared-memory` 沉淀可复用模式），最后以 `feat: [US-xxx] - [标题]` 提交全部变更。
    每个 agent 回合都会收到统一的 **Round Commit Contract**：本轮产生的所有预期仓库产物必须在本轮结束前提交，不能留给后续 story、finalization、merge-back 或 consolidation 代为提交；若只形成了安全且完整的阶段性成果，则提交 checkpoint，但仍保持故事未完成。运行时 marker、临时诊断文件和无产物的幂等重试不要求空提交。
-5. 循环把故事状态同步回 `prd.json`（安全时 amend 进故事提交），并且**只认文件**：agent 光喊 `<promise>COMPLETE</promise>` 而 `passes` 仍是 `false`，只会得到一条警告，循环照常继续。
-6. 重复，直到所有故事通过，或达到 `max_iterations`（默认 10）。
+5. 循环把故事状态同步回 `prd.json`（安全时 amend 进故事提交），并且**只认文件**。当前故事变为 `passes: true` 才正常进入下一故事；只要仍是 `passes != true`，无论 agent 口头上如何声明，都不会再重跑实现轮。
+6. 未完成的故事只会额外触发一次专门的**失败诊断轮**（`DIAGNOSE_FAILURE.md`）。它会拿到当前故事、近期进度、前后 Git HEAD、上一轮 agent 消息，以及可用时的原始失败事件；诊断 agent 以只读权限运行，把结构化的根因报告打印到终端后退出 `1`，后续正常轮次全部跳过。这个特别轮次不占 `max_iterations`。
+7. 只有成功的故事轮会继续，直到所有故事通过，或达到 `max_iterations`（默认 10）。
 
 交互式终端的最底部会常驻一条进度栏，上方的 agent 日志照常滚动：
 
@@ -162,7 +164,7 @@ Ralph usage for this run:
 - **claude** 自己上报 `total_cost_usd`，因此 Ralph 直接采用 CLI 给出的数字，不自行计价。订阅制账户下这个数字是等价 API 价格，并非实际扣费。
 - **codex** 只报 token 不报金额，因此 Ralph 按价格表估算。默认值为 gpt-5.6-sol 标准档（每百万 token：输入 $5、缓存命中 $0.50、缓存写入 $6.25、输出 $30）；换模型时请自行覆盖。输入超过 272K 的请求走更贵的长上下文档，而事件流并不逐请求暴露这一点，因此长期处于该档的 run 会被低估，除非你调高上述价格。
 
-防护措施：单次调用的空闲超时（默认静默 360 秒即终止）和可选的硬超时；命中限流时以专用退出码 75 中止整个循环；每次调用后清扫进程树，回收残留的 dev server / watcher（含 Windows Git Bash 的特殊处理）。Codex 使用 `--json` 且保留正常 session：Ralph 直接从管道实时解析 JSONL，只在内存环形缓冲中保留最近 100 条事件；仅当本次调用失败时，才把这些原始事件写入临时诊断文件。
+防护措施：单次调用的空闲超时（默认静默 360 秒即终止）和可选的硬超时；命中限流时以专用退出码 75 中止整个循环；每次调用后清扫进程树，回收残留的 dev server / watcher（含 Windows Git Bash 的特殊处理）。Codex 使用 `--json` 且保留正常 session：Ralph 直接从管道实时解析 JSONL，只在内存环形缓冲中保留最近 100 条事件；仅当本次调用失败时，才把这些原始事件写入临时诊断文件。最后的诊断轮可以读取该文件，但不能改仓库（Codex 使用 `--sandbox read-only`，Claude 使用 plan 权限模式）。
 
 ### 阶段 4 —— merge-back：分支合并回基线
 
@@ -211,7 +213,7 @@ ralph/scripts/orchestrate.sh --tool claude --plan "1 > 2,3 > 4"
 |---|---|---|
 | `--run <run_id>` / `RALPH_RUN_ID` | 交互式选择 | 执行哪个 run |
 | `--tool claude\|codex` / `RALPH_TOOL` | `codex` | 用哪个 agent CLI 驱动迭代 |
-| `[max_iterations]` | `10` | 循环预算 |
+| `[max_iterations]` | `10` | 正常循环预算；最后一次失败诊断不计入 |
 | `--legacy` | — | 单 run 模式，使用根级 `ralph/prd.json`（无 run 目录） |
 | `RALPH_TOOL_IDLE_TIMEOUT_SECONDS` | `360` | agent 静默多久后终止本次调用 |
 | `RALPH_TOOL_TIMEOUT_SECONDS` | `0`（关闭） | 单次调用硬上限 |
@@ -224,7 +226,7 @@ ralph/scripts/orchestrate.sh --tool claude --plan "1 > 2,3 > 4"
 | `RALPH_NOTIFY` / `RALPH_NOTIFY_SOUND` | `1` | 桌面通知 |
 | `RALPH_PLAN` | — | `orchestrate.sh` 的默认计划 |
 
-退出码：`0` 全部完成，`1` 达到迭代上限/失败，`75` 命中限流，`124` 工具超时。
+退出码：`0` 全部完成，`1` 达到迭代上限/故事失败且已诊断，`75` 命中限流，`124` 工具超时。
 
 ## 安装
 

@@ -5,6 +5,9 @@
   "license": "MIT",
   "author": "levinhen",
   "type": "module",
+  "scripts": {
+    "test": "bash tests/failure-diagnosis.sh"
+  },
   "bin": {
     "ralph-kit": "bin/ralph-kit.mjs"
   },

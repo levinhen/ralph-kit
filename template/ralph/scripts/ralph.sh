@@ -78,6 +78,7 @@ ROOT_CODEX_PROMPT_FILE="$SCRIPT_DIR/CODEX.md"
 MERGE_BACK_PROMPT_FILE="$SCRIPT_DIR/MERGE_BACK.md"
 MERGE_BACK_STATE_FILE="$RALPH_ROOT/.merge-back-done"
 CONSOLIDATE_PROMPT_FILE_TEMPLATE="$SCRIPT_DIR/CONSOLIDATE.md"
+FAILURE_DIAGNOSIS_PROMPT_FILE_TEMPLATE="$SCRIPT_DIR/DIAGNOSE_FAILURE.md"
 CONSOLIDATION_STATE_FILE=""
 CONSOLIDATION_STATE_REL_PATH=""
 WORKTREE_ROOT="$REPO_ROOT/.worktrees"
@@ -93,6 +94,7 @@ LAST_TOOL_DIAGNOSTIC_FILE=""
 LAST_TOOL_EXIT_CODE=0
 LAST_TOOL_SAW_COMPLETION="false"
 CONSECUTIVE_TOOL_FAILURES=0
+DEFER_TOOL_FAILURE_STOP="false"
 RALPH_PROCESS_GROUP=""
 ACTIVE_WORKTREE=""
 
@@ -137,6 +139,7 @@ MERGE_PROMPT_FILE=""
 FINALIZE_PROMPT_FILE=""
 ITERATION_PROMPT_FILE=""
 CONSOLIDATE_PROMPT_FILE=""
+FAILURE_DIAGNOSIS_PROMPT_FILE=""
 ROOT_STATE_FILE_WAS_MISSING="false"
 
 if [[ "$RUN_MODE" == "scoped" ]]; then
@@ -172,7 +175,7 @@ cleanup() {
   if [[ "$RALPH_IS_WINDOWS" == "true" && -n "$ACTIVE_WORKTREE" && "$ACTIVE_WORKTREE" != "$REPO_ROOT" ]]; then
     windows_sweep_worktree_strays "$ACTIVE_WORKTREE" || true
   fi
-  rm -f "$ACTIVE_CONTEXT_PROMPT_FILE" "$MERGE_PROMPT_FILE" "$FINALIZE_PROMPT_FILE" "$ITERATION_PROMPT_FILE" "$CONSOLIDATE_PROMPT_FILE" || true
+  rm -f "$ACTIVE_CONTEXT_PROMPT_FILE" "$MERGE_PROMPT_FILE" "$FINALIZE_PROMPT_FILE" "$ITERATION_PROMPT_FILE" "$CONSOLIDATE_PROMPT_FILE" "$FAILURE_DIAGNOSIS_PROMPT_FILE" || true
   release_dir_lock "$MERGE_LOCK_DIR" || true
   release_dir_lock "$RUN_LOCK_DIR" || true
 }
@@ -365,6 +368,11 @@ fi
 
 if [[ "$RUN_MODE" == "scoped" && ! -f "$CONSOLIDATE_PROMPT_FILE_TEMPLATE" ]]; then
   echo "Error: Missing consolidation prompt file: $CONSOLIDATE_PROMPT_FILE_TEMPLATE"
+  exit 1
+fi
+
+if [[ ! -f "$FAILURE_DIAGNOSIS_PROMPT_FILE_TEMPLATE" ]]; then
+  echo "Error: Missing failure diagnosis prompt file: $FAILURE_DIAGNOSIS_PROMPT_FILE_TEMPLATE"
   exit 1
 fi
 
@@ -625,11 +633,25 @@ EOF
 
   PRE_ITERATION_HEAD=$(git -C "$ACTIVE_WORKTREE" rev-parse --verify HEAD 2>/dev/null || echo "")
 
+  # A story round is never retried blindly. Even when the underlying CLI fails,
+  # let the loop reach the file-based story check so it can run one diagnosis
+  # round and stop with useful evidence.
+  DEFER_TOOL_FAILURE_STOP="true"
   run_selected_tool "$ACTIVE_WORKTREE" "$ITERATION_PROMPT_FILE"
+  DEFER_TOOL_FAILURE_STOP="false"
   rm -f "$ITERATION_PROMPT_FILE"
   ITERATION_PROMPT_FILE=""
 
+  FAILED_ROUND_LAST_MESSAGE="$LAST_MESSAGE"
+  if [[ -z "$FAILED_ROUND_LAST_MESSAGE" ]]; then
+    FAILED_ROUND_LAST_MESSAGE="$OUTPUT"
+  fi
+  FAILED_ROUND_TOOL_EXIT_CODE="$LAST_TOOL_EXIT_CODE"
+  FAILED_ROUND_SAW_COMPLETION="$LAST_TOOL_SAW_COMPLETION"
+  FAILED_ROUND_DIAGNOSTIC_FILE="$LAST_TOOL_DIAGNOSTIC_FILE"
+
   sync_story_files_to_prd_after_iteration "$PRE_ITERATION_HEAD"
+  FAILED_ROUND_AFTER_HEAD=$(git -C "$ACTIVE_WORKTREE" rev-parse --verify HEAD 2>/dev/null || echo "")
   ralph_progress_update "checking" "$CURRENT_STORY_ID" "$i"
 
   STORY_PASSED=$(jq -r --arg story_id "$CURRENT_STORY_ID" '
@@ -648,6 +670,58 @@ EOF
 
   if [[ "$STORY_PASSED" != "true" ]]; then
     echo "Warning: $CURRENT_STORY_ID is still not marked passes=true in $PRD_FILE"
+
+    ralph_progress_update "diagnosing" "$CURRENT_STORY_ID" "$i"
+    echo ""
+    echo "==============================================================="
+    echo "  Ralph Failure Diagnosis Round ($TOOL) - Target: $CURRENT_STORY_ID"
+    echo "==============================================================="
+    echo "The failed story will not be retried. Diagnosing the last round, then stopping."
+
+    FAILURE_DIAGNOSIS_PROMPT_FILE=$(mktemp)
+    make_failure_diagnosis_prompt \
+      "$FAILURE_DIAGNOSIS_PROMPT_FILE" \
+      "$CURRENT_STORY_ID" \
+      "$CURRENT_STORY_FILE" \
+      "$i" \
+      "$FAILED_ROUND_TOOL_EXIT_CODE" \
+      "$FAILED_ROUND_SAW_COMPLETION" \
+      "$PRE_ITERATION_HEAD" \
+      "$FAILED_ROUND_AFTER_HEAD" \
+      "$FAILED_ROUND_DIAGNOSTIC_FILE" \
+      "$FAILED_ROUND_LAST_MESSAGE"
+
+    DEFER_TOOL_FAILURE_STOP="true"
+    run_selected_tool "$ACTIVE_WORKTREE" "$FAILURE_DIAGNOSIS_PROMPT_FILE" "read-only"
+    DEFER_TOOL_FAILURE_STOP="false"
+    rm -f "$FAILURE_DIAGNOSIS_PROMPT_FILE"
+    FAILURE_DIAGNOSIS_PROMPT_FILE=""
+
+    FAILURE_DIAGNOSIS_MESSAGE="$LAST_MESSAGE"
+    if [[ -z "$FAILURE_DIAGNOSIS_MESSAGE" ]]; then
+      FAILURE_DIAGNOSIS_MESSAGE="$OUTPUT"
+    fi
+
+    # Release the pinned row before printing the durable handoff so the report
+    # remains readable at the user's shell prompt.
+    ralph_progress_stop || true
+    echo ""
+    echo "================ Ralph Failure Diagnosis ================"
+    if [[ -n "$FAILURE_DIAGNOSIS_MESSAGE" ]]; then
+      printf '%s\n' "$FAILURE_DIAGNOSIS_MESSAGE"
+    else
+      echo "The diagnosis agent produced no final report (exit $LAST_TOOL_EXIT_CODE)."
+      if [[ -n "$LAST_TOOL_DIAGNOSTIC_FILE" ]]; then
+        echo "Its recent raw events are available at: $LAST_TOOL_DIAGNOSTIC_FILE"
+      fi
+      if [[ -n "$FAILED_ROUND_DIAGNOSTIC_FILE" ]]; then
+        echo "The failed implementation round's raw events are available at: $FAILED_ROUND_DIAGNOSTIC_FILE"
+      fi
+    fi
+    echo "==========================================================="
+    echo "Ralph stopped after diagnosing $CURRENT_STORY_ID. Review the report above before rerunning."
+    notify_ralph_needs_attention "story $CURRENT_STORY_ID did not pass; diagnosis printed to the terminal"
+    exit 1
   fi
 
   if [[ "$ALL_COMPLETE" == "true" ]] && merge_back_needed; then

@@ -21,6 +21,13 @@ resolve_tool_prompt() {
         echo "$CODEX_PROMPT_FILE"
       fi
       ;;
+    pi)
+      if [[ "$scope" == "root" ]]; then
+        echo "$ROOT_PI_PROMPT_FILE"
+      else
+        echo "$PI_PROMPT_FILE"
+      fi
+      ;;
   esac
 }
 
@@ -92,35 +99,56 @@ run_selected_tool() {
     return 1
   fi
 
-  if [[ "$TOOL" == "claude" ]]; then
-    tool_bin="$(require_tool_command "$TOOL" claude claude.cmd)" || return $?
-    if [[ "$access_mode" == "read-only" ]]; then
-      command_args=("$tool_bin" --permission-mode plan --print --verbose --output-format stream-json)
-    else
-      command_args=("$tool_bin" --dangerously-skip-permissions --print --verbose --output-format stream-json)
-    fi
-  else
-    LAST_MESSAGE_FILE=$(mktemp)
-    tool_bin="$(require_tool_command "$TOOL" codex codex.cmd)" || return $?
-    if [[ "$access_mode" == "read-only" ]]; then
-      command_args=("$tool_bin" exec \
-        --cd "$run_cwd" \
-        --sandbox read-only \
-        --config 'approval_policy="never"' \
-        --skip-git-repo-check \
-        --json \
-        --output-last-message "$LAST_MESSAGE_FILE" \
-        -)
-    else
-      command_args=("$tool_bin" exec \
-        --cd "$run_cwd" \
-        --dangerously-bypass-approvals-and-sandbox \
-        --skip-git-repo-check \
-        --json \
-        --output-last-message "$LAST_MESSAGE_FILE" \
-        -)
-    fi
-  fi
+  case "$TOOL" in
+    claude)
+      tool_bin="$(require_tool_command "$TOOL" claude claude.cmd)" || return $?
+      if [[ "$access_mode" == "read-only" ]]; then
+        command_args=("$tool_bin" --permission-mode plan --print --verbose --output-format stream-json)
+      else
+        command_args=("$tool_bin" --dangerously-skip-permissions --print --verbose --output-format stream-json)
+      fi
+      ;;
+    codex)
+      LAST_MESSAGE_FILE=$(mktemp)
+      tool_bin="$(require_tool_command "$TOOL" codex codex.cmd)" || return $?
+      if [[ "$access_mode" == "read-only" ]]; then
+        command_args=("$tool_bin" exec \
+          --cd "$run_cwd" \
+          --sandbox read-only \
+          --config 'approval_policy="never"' \
+          --skip-git-repo-check \
+          --json \
+          --output-last-message "$LAST_MESSAGE_FILE" \
+          -)
+      else
+        command_args=("$tool_bin" exec \
+          --cd "$run_cwd" \
+          --dangerously-bypass-approvals-and-sandbox \
+          --skip-git-repo-check \
+          --json \
+          --output-last-message "$LAST_MESSAGE_FILE" \
+          -)
+      fi
+      ;;
+    pi)
+      tool_bin="$(require_tool_command "$TOOL" pi pi.cmd)" || return $?
+      # pi ships no sandbox of its own (by design - see its security docs), so a
+      # read-only round is bounded by the two things Ralph can actually control:
+      # the edit/write tools are removed, and project-local pi extensions stay
+      # unloaded so the repository cannot hand the diagnosis round new tools.
+      # `bash` survives because the round has to inspect git state; the rest of
+      # the contract lives in DIAGNOSE_FAILURE.md.
+      if [[ "$access_mode" == "read-only" ]]; then
+        command_args=("$tool_bin" --print --mode json --no-approve --exclude-tools edit,write)
+      else
+        command_args=("$tool_bin" --print --mode json --approve)
+      fi
+      ;;
+    *)
+      echo "Error: Ralph does not know how to run tool '$TOOL'." >&2
+      return 1
+      ;;
+  esac
 
   stream_state_dir=$(mktemp -d "${TMPDIR:-/tmp}/ralph-stream.XXXXXX")
   output_fifo="$stream_state_dir/events.fifo"
@@ -131,8 +159,8 @@ run_selected_tool() {
 
   ACTIVE_STREAM_STATE_DIR="$stream_state_dir"
 
-  # Both CLIs emit one JSON event per line, covering full tool inputs, tool
-  # results and usage metadata. Echoing that raw drowns out anything useful, so
+  # Every supported CLI emits one JSON event per line, covering full tool inputs,
+  # tool results and usage metadata. Echoing that raw drowns out anything useful, so
   # stream-agent.mjs reduces it to a compact log on stderr and leaves a summary
   # behind for us. Ralph never keeps a second copy of the whole stream.
   #
@@ -180,6 +208,8 @@ run_selected_tool() {
     fi
   fi
 
+  # Only codex can hand back its closing message on its own; for the others the
+  # concatenated assistant text is the best available stand-in.
   if [[ "$TOOL" == "codex" ]]; then
     LAST_MESSAGE=$(cat "$LAST_MESSAGE_FILE" 2>/dev/null || true)
     rm -f "$LAST_MESSAGE_FILE"

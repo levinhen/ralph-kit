@@ -1,6 +1,6 @@
 #!/bin/bash
 # Ralph Wiggum - Long-running AI agent loop
-# Usage: ./ralph.sh [--run run_id|--legacy] [--tool claude|codex] [max_iterations]
+# Usage: ./ralph.sh [--run run_id|--legacy] [--tool claude|codex|pi] [max_iterations]
 
 set -e
 
@@ -47,8 +47,8 @@ while [[ $# -gt 0 ]]; do
 done
 
 # Validate tool choice
-if [[ "$TOOL" != "claude" && "$TOOL" != "codex" ]]; then
-  echo "Error: Invalid tool '$TOOL'. Must be 'claude' or 'codex'."
+if [[ "$TOOL" != "claude" && "$TOOL" != "codex" && "$TOOL" != "pi" ]]; then
+  echo "Error: Invalid tool '$TOOL'. Must be 'claude', 'codex', or 'pi'."
   exit 1
 fi
 
@@ -75,6 +75,7 @@ ROOT_ARCHIVE_DIR="$RALPH_ROOT/archive"
 ROOT_LAST_BRANCH_FILE="$RALPH_ROOT/.last-branch"
 ROOT_CLAUDE_PROMPT_FILE="$SCRIPT_DIR/CLAUDE.md"
 ROOT_CODEX_PROMPT_FILE="$SCRIPT_DIR/CODEX.md"
+ROOT_PI_PROMPT_FILE="$SCRIPT_DIR/PI.md"
 MERGE_BACK_PROMPT_FILE="$SCRIPT_DIR/MERGE_BACK.md"
 MERGE_BACK_STATE_FILE="$RALPH_ROOT/.merge-back-done"
 CONSOLIDATE_PROMPT_FILE_TEMPLATE="$SCRIPT_DIR/CONSOLIDATE.md"
@@ -297,6 +298,7 @@ ACTIVE_RALPH_ROOT="$ACTIVE_WORKTREE/ralph"
 ACTIVE_SCRIPT_DIR="$ACTIVE_RALPH_ROOT/scripts"
 CLAUDE_PROMPT_FILE="$ACTIVE_SCRIPT_DIR/CLAUDE.md"
 CODEX_PROMPT_FILE="$ACTIVE_SCRIPT_DIR/CODEX.md"
+PI_PROMPT_FILE="$ACTIVE_SCRIPT_DIR/PI.md"
 ACTIVE_MERGE_BACK_PROMPT_FILE="$ACTIVE_SCRIPT_DIR/MERGE_BACK.md"
 
 if [[ "$RUN_MODE" == "scoped" ]]; then
@@ -347,6 +349,10 @@ fi
 
 if [[ ! -f "$CODEX_PROMPT_FILE" ]]; then
   CODEX_PROMPT_FILE="$ROOT_CODEX_PROMPT_FILE"
+fi
+
+if [[ ! -f "$PI_PROMPT_FILE" ]]; then
+  PI_PROMPT_FILE="$ROOT_PI_PROMPT_FILE"
 fi
 
 ACTIVE_PROMPT_FILE="$(resolve_tool_prompt active)"

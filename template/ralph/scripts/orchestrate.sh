@@ -2,7 +2,7 @@
 # Ralph Orchestrator - Run multiple Ralph runs in stages.
 #
 # Usage:
-#   ./orchestrate.sh [--tool claude|codex] [--plan "1 > 2,3 > 4"]
+#   ./orchestrate.sh [--tool claude|codex|pi] [--plan "1 > 2,3 > 4"]
 #                    [--dry-run] [max_iterations]
 #
 # Plan syntax:
@@ -74,8 +74,8 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if [[ "$TOOL" != "claude" && "$TOOL" != "codex" ]]; then
-  echo "Error: Invalid tool '$TOOL'. Must be 'claude' or 'codex'." >&2
+if [[ "$TOOL" != "claude" && "$TOOL" != "codex" && "$TOOL" != "pi" ]]; then
+  echo "Error: Invalid tool '$TOOL'. Must be 'claude', 'codex', or 'pi'." >&2
   exit 1
 fi
 

@@ -1,12 +1,12 @@
 {
   "name": "@levinhen/ralph-kit",
   "version": "0.4.0",
-  "description": "One-command installer for the Ralph autonomous-agent loop + Claude/Codex skills. Forked from snarktank/ralph.",
+  "description": "One-command installer for the Ralph autonomous-agent loop + Claude/Codex/pi skills. Forked from snarktank/ralph.",
   "license": "MIT",
   "author": "levinhen",
   "type": "module",
   "scripts": {
-    "test": "bash tests/failure-diagnosis.sh"
+    "test": "bash tests/failure-diagnosis.sh && bash tests/pi-tool.sh"
   },
   "bin": {
     "ralph-kit": "bin/ralph-kit.mjs"
@@ -28,6 +28,7 @@
     "ralph",
     "claude-code",
     "codex",
+    "pi",
     "agent",
     "autonomous",
     "prd",

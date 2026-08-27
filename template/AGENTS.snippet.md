@@ -1,11 +1,11 @@
 <!-- ralph-kit:begin -->
 ## Ralph (autonomous agent loop)
 
-This project ships the Ralph multi-agent loop under `ralph/` and two companion skills (`/prd`, `/ralph`) shipped to both `.claude/skills/` (Claude Code) and `.agents/skills/` (Codex). Both copies are byte-identical; Codex discovers repo-level skills under `.agents/skills/`.
+This project ships the Ralph multi-agent loop under `ralph/` and two companion skills (`/prd`, `/ralph`) shipped to both `.claude/skills/` (Claude Code) and `.agents/skills/` (Codex and pi). Both copies are byte-identical; Codex and pi both discover repo-level skills under `.agents/skills/`.
 
 Directory layout:
 
-- `ralph/scripts/` — static loop code: `ralph.sh`, `orchestrate.sh`, `create-run.sh`, `append-progress-json.sh`, `lib/`, and the agent prompt files (`CLAUDE.md`, `CODEX.md`, `DIAGNOSE_FAILURE.md`, `MERGE_BACK.md`, `CONSOLIDATE.md`).
+- `ralph/scripts/` — static loop code: `ralph.sh`, `orchestrate.sh`, `create-run.sh`, `append-progress-json.sh`, `lib/`, and the agent prompt files (`CLAUDE.md`, `CODEX.md`, `PI.md`, `DIAGNOSE_FAILURE.md`, `MERGE_BACK.md`, `CONSOLIDATE.md`).
 - `ralph/tasks/` — PRD markdown authored by `/prd` for runs that are still in play (input to `/ralph` and the consolidation round).
 - `ralph/runs/<run_id>/` — active runs (PRD JSON, per-story state, progress logs).
 - `ralph/archive/<date>-<run_id>/` — completed runs after consolidation, together with the run's source PRD markdown (`prd-<run_id>.md`).
@@ -17,10 +17,11 @@ Common entry points:
 - `ralph/scripts/create-run.sh <run_id> path/to/prd.json` — initialize a run directory from an existing `prd.json`.
 - `ralph/scripts/CLAUDE.md` — agent instructions consumed when `--tool claude` is used.
 - `ralph/scripts/CODEX.md` — agent instructions consumed when `--tool codex` is used.
-- `/prd` skill — generate a PRD from a feature description (`.claude/skills/prd/` for Claude Code, `.agents/skills/prd/` for Codex).
-- `/ralph` skill — convert an existing PRD to Ralph's run-scoped `prd.json` (`.claude/skills/ralph/` for Claude Code, `.agents/skills/ralph/` for Codex).
+- `ralph/scripts/PI.md` — agent instructions consumed when `--tool pi` is used.
+- `/prd` skill — generate a PRD from a feature description (`.claude/skills/prd/` for Claude Code, `.agents/skills/prd/` for Codex and pi).
+- `/ralph` skill — convert an existing PRD to Ralph's run-scoped `prd.json` (`.claude/skills/ralph/` for Claude Code, `.agents/skills/ralph/` for Codex and pi).
 
 Do not edit `ralph/runs/<run_id>/progress/*.jsonl` or `progress/shared-memory.json` by hand — use `ralph/scripts/append-progress-json.sh`.
 
-See `ralph/scripts/CLAUDE.md` (or `CODEX.md`) for full per-iteration agent behavior.
+See `ralph/scripts/CLAUDE.md` (or `CODEX.md` / `PI.md`) for full per-iteration agent behavior.
 <!-- ralph-kit:end -->

@@ -20,6 +20,7 @@
 import { createInterface } from 'node:readline'
 import { writeFileSync, renameSync } from 'node:fs'
 
+const SUPPORTED_TOOLS = ['claude', 'codex', 'pi']
 const RING_LIMIT = 100
 // The only consumer is wait_for_active_tool, which polls on a 2s sleep against a
 // 360s idle timeout. Anything below that poll interval guarantees a fresh value
@@ -30,7 +31,7 @@ const RATE_LIMIT_PATTERN =
 
 // Token accounting.
 //
-// Both CLIs report usage, but neither the shape nor the meaning of "input"
+// All three CLIs report usage, but neither the shape nor the meaning of "input"
 // matches:
 //
 //   claude  result.usage        input_tokens EXCLUDES cache reads and writes,
@@ -41,6 +42,10 @@ const RATE_LIMIT_PATTERN =
 //                               cache_write_input_tokens (the OpenAI convention),
 //                               and no cost is reported at all, so Ralph has to
 //                               price it from a rate table.
+//   pi      message.usage       input EXCLUDES cacheRead/cacheWrite, and
+//                               usage.cost.total is pi's own catalogue-priced
+//                               bill for the model it actually ran, so Ralph
+//                               takes that number instead of its rate table.
 //
 // Everything below is normalised into the same four buckets, where `input`
 // always means new, uncached input.
@@ -108,7 +113,7 @@ function parseArgs(argv) {
 
 const options = parseArgs(process.argv.slice(2))
 
-if (options.tool !== 'claude' && options.tool !== 'codex') {
+if (!SUPPORTED_TOOLS.includes(options.tool)) {
   process.stderr.write(`stream-agent: unsupported --tool '${options.tool}'\n`)
   process.exit(2)
 }
@@ -262,6 +267,122 @@ function recordClaudeUsage(event) {
   }
 }
 
+// pi reports usage per message, and only assistant messages (plus a sub-agent's
+// toolResult) carry one. message_end is the single place each usage object
+// appears exactly once - turn_end and agent_end both repeat messages that were
+// already reported there.
+function recordPiUsage(message) {
+  const reported = message.usage
+  if (!reported || typeof reported !== 'object') return
+
+  addUsage({
+    input: tokenCount(reported.input),
+    cached: tokenCount(reported.cacheRead),
+    cacheWrite: tokenCount(reported.cacheWrite),
+    output: tokenCount(reported.output),
+  })
+
+  // pi prices the model it actually ran from its own catalogue, so this is a
+  // reported bill rather than something Ralph's rate table has to guess at.
+  const cost = Number(reported.cost?.total)
+  if (Number.isFinite(cost) && cost >= 0) {
+    costMicros += Math.round(cost * 1e6)
+    costExact = true
+  }
+}
+
+// pi passes structured tool args, so the useful half of a one-line log entry is
+// whichever field names the target. Anything else degrades to the tool name.
+const PI_TOOL_HINT_KEYS = ['command', 'path', 'file_path', 'pattern', 'query']
+
+function piToolHint(args) {
+  if (!args || typeof args !== 'object') return ''
+
+  for (const key of PI_TOOL_HINT_KEYS) {
+    const value = args[key]
+    if (typeof value !== 'string' || value === '') continue
+    const firstLine = value.split('\n', 1)[0]
+    return firstLine.length > 160 ? `${firstLine.slice(0, 157)}...` : firstLine
+  }
+
+  return ''
+}
+
+// pi keeps the stream open across its own auto-retries, so whether the
+// invocation landed is decided by the last assistant message, not the first.
+let piLastStopReason = ''
+
+function transformPi(event) {
+  const lines = []
+
+  switch (event.type) {
+    case 'session':
+      lines.push(`[pi session: ${event.id ?? '?'}]`)
+      break
+    case 'message_end': {
+      const message = event.message || {}
+      if (message.role !== 'assistant') break
+
+      recordPiUsage(message)
+
+      // Unlike codex, pi names the model it resolved on every assistant
+      // message, so the label is the real one rather than a priced-for guess.
+      if (!modelLabel && typeof message.model === 'string' && message.model !== '') {
+        modelLabel = message.model
+      }
+
+      piLastStopReason = typeof message.stopReason === 'string' ? message.stopReason : ''
+      if (piLastStopReason === 'error' || piLastStopReason === 'aborted') {
+        const detail = errorText({ message: message.errorMessage }, `assistant turn ${piLastStopReason}`)
+        errorTexts.push(detail)
+        sawFailure = true
+        lines.push(`[${piLastStopReason}] ${detail}`)
+      }
+
+      if (Array.isArray(message.content)) {
+        for (const block of message.content) {
+          if (block?.type === 'text' && block.text) {
+            assistantChunks.push(block.text)
+            lines.push(block.text)
+          }
+        }
+      }
+      break
+    }
+    case 'tool_execution_start': {
+      const name = event.toolName ?? 'tool'
+      const hint = piToolHint(event.args)
+      lines.push(hint ? `· ${name}: ${hint}` : `· ${name}`)
+      break
+    }
+    case 'compaction_start':
+      lines.push('[compacting context]')
+      break
+    case 'auto_retry_start': {
+      const detail = errorText({ message: event.errorMessage }, 'transient error')
+      // Kept in errorTexts so a 429 pi retried into a failure is still visible
+      // to the rate-limit check, which only fires on a non-zero exit anyway.
+      errorTexts.push(detail)
+      lines.push(`[retry ${event.attempt ?? '?'}/${event.maxAttempts ?? '?'}] ${detail}`)
+      break
+    }
+    case 'agent_end':
+      if (event.willRetry === true) break
+      if (piLastStopReason === 'error' || piLastStopReason === 'aborted') {
+        sawFailure = true
+        lines.push(`[failed: ${piLastStopReason}]`)
+      } else {
+        sawCompletion = true
+        lines.push('[done]')
+      }
+      break
+    default:
+      break
+  }
+
+  return lines
+}
+
 function transformCodex(event) {
   const lines = []
   const item = event.item || {}
@@ -371,7 +492,13 @@ function transformClaude(event) {
   return lines
 }
 
-const transform = options.tool === 'codex' ? transformCodex : transformClaude
+const TRANSFORMS = {
+  claude: transformClaude,
+  codex: transformCodex,
+  pi: transformPi,
+}
+
+const transform = TRANSFORMS[options.tool]
 
 // codex never names its model in the event stream, so the label is whatever the
 // rate table is priced for. Claude fills this in from its own init event.
@@ -380,7 +507,9 @@ if (options.tool === 'codex') {
 }
 
 function writeSummary() {
-  const assistantText = assistantChunks.join(options.tool === 'codex' ? '\n\n' : '')
+  // claude streams one chunk per text block of a single message; codex and pi
+  // hand over whole messages, which have to stay separated to stay readable.
+  const assistantText = assistantChunks.join(options.tool === 'claude' ? '' : '\n\n')
   const errors = errorTexts.join('\n')
   const rateLimited =
     RATE_LIMIT_PATTERN.test(errors) ||

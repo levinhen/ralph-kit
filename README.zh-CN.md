@@ -2,7 +2,7 @@
 
 [English](./README.md) | 简体中文
 
-一条命令即可把 [Ralph](https://github.com/snarktank/ralph) 自主 agent 循环装进任意项目，并附带配套的 Claude Code 技能（`/prd`、`/ralph`）和 Codex（`AGENTS.md`）集成。
+一条命令即可把 [Ralph](https://github.com/snarktank/ralph) 自主 agent 循环装进任意项目，并附带配套的 Claude Code 技能（`/prd`、`/ralph`）和 Codex / pi（`AGENTS.md`）集成。
 
 一段话概括整个玩法：**你在对话里描述一个需求 → 生成一份由你审阅确认的 PRD → PRD 被拆成一组小而可验证的用户故事 → 一个 shell 循环在隔离的 git worktree 里为每个故事启动一个全新的 AI agent，逐个实现、检查、提交，直到所有故事通过 → 分支合并回基线分支，本次运行的设计决策被沉淀进长期维护的 design ledger，运行目录归档。** 文件就是记忆，git 就是检查点，每次 agent 调用都从干净的上下文窗口开始。
 
@@ -22,7 +22,7 @@ AGENTS.md                     # （创建或追加标记段；已有内容保留
 
 Ralph 生成的一切都收在 `ralph/` 下——代码、运行时状态、归档放在一起，不污染 `scripts/`。
 
-**环境要求：** Bash（macOS、Linux，或 Windows 上的 Git Bash）、`git`、`jq`、Node.js 18+，以及 `PATH` 上至少一个 agent CLI——`claude`（Claude Code）或 `codex`。
+**环境要求：** Bash（macOS、Linux，或 Windows 上的 Git Bash）、`git`、`jq`、Node.js 18+，以及 `PATH` 上至少一个 agent CLI——`claude`（Claude Code）、`codex` 或 `pi`（[pi-coding-agent](https://www.npmjs.com/package/@earendil-works/pi-coding-agent)）。
 
 ## 整体实现流程
 
@@ -47,7 +47,7 @@ ralph/runs/<run_id>/prd.json          机器可读的运行定义
         │  迭代循环——每个故事一个全新 agent：
         │    1. 取第一个 passes=false 的故事
         │    2. prompt = agent 手册 + 故事 JSON + 记忆切片
-        │    3. 启动全新的 claude / codex 进程
+        │    3. 启动全新的 claude / codex / pi 进程
         │    4. agent：实现 → 质量检查 → passes=true → 提交
         │    5. 把故事状态同步回 prd.json
         │       passes!=true → 只读失败诊断轮 → 输出终端 → 停止
@@ -105,7 +105,7 @@ ralph/runs/<run_id>/
 ### 阶段 3 —— 执行：`ralph.sh` 循环，每个故事一个全新 agent
 
 ```sh
-ralph/scripts/ralph.sh --run <run_id> --tool claude 20   # 或 --tool codex（默认）
+ralph/scripts/ralph.sh --run <run_id> --tool claude 20   # 或 --tool codex（默认）/ --tool pi
 ```
 
 **启动（一次性）：**
@@ -119,11 +119,11 @@ ralph/scripts/ralph.sh --run <run_id> --tool claude 20   # 或 --tool codex（�
 
 1. 先把 `stories/*.json` 同步回 `prd.json`，然后取**第一个 `passes != true` 的故事**。
 2. 拼装一次性 prompt，内容包括：
-   - agent 行为手册——`scripts/CLAUDE.md`（`--tool claude` 时）或 `scripts/CODEX.md`（`--tool codex` 时）；
+   - agent 行为手册——`scripts/CLAUDE.md`（`--tool claude` 时）、`scripts/CODEX.md`（`--tool codex` 时）或 `scripts/PI.md`（`--tool pi` 时）；
    - run 上下文（分支、worktree、各文件路径）；
    - **仅当前故事的 JSON**（并明确告知 agent 不要去读完整 PRD）；
    - **记忆切片**：最近约 40 条 shared-memory 条目 + 该故事最近约 5 条进度记录。
-3. 在 worktree 里启动一个**全新的 agent 进程**（`claude --print …` 或 `codex exec …`，跳过权限确认——本循环就是为无人值守设计的）。没有聊天历史，没有上一轮迭代的上下文。
+3. 在 worktree 里启动一个**全新的 agent 进程**（`claude --print …`、`codex exec …` 或 `pi --print --mode json …`，跳过权限确认——本循环就是为无人值守设计的）。没有聊天历史，没有上一轮迭代的上下文。
 4. agent 按手册行事：只实现**这一个故事**（只做 `Covers:` 指明的那一块），跑项目的质量检查（typecheck/lint/测试），把故事文件改为 `passes: true` 并写下 `notes`，用 `append-progress-json.sh` 追加结构化进度记录（一行 JSON 写进 `progress/<story_id>.jsonl`，可选 `--shared-memory` 沉淀可复用模式），最后以 `feat: [US-xxx] - [标题]` 提交全部变更。
    每个 agent 回合都会收到统一的 **Round Commit Contract**：本轮产生的所有预期仓库产物必须在本轮结束前提交，不能留给后续 story、finalization、merge-back 或 consolidation 代为提交；若只形成了安全且完整的阶段性成果，则提交 checkpoint，但仍保持故事未完成。运行时 marker、临时诊断文件和无产物的幂等重试不要求空提交。
 5. 循环把故事状态同步回 `prd.json`（安全时 amend 进故事提交），并且**只认文件**。当前故事变为 `passes: true` 才正常进入下一故事；只要仍是 `passes != true`，无论 agent 口头上如何声明，都不会再重跑实现轮。
@@ -163,8 +163,11 @@ Ralph usage for this run:
 
 - **claude** 自己上报 `total_cost_usd`，因此 Ralph 直接采用 CLI 给出的数字，不自行计价。订阅制账户下这个数字是等价 API 价格，并非实际扣费。
 - **codex** 只报 token 不报金额，因此 Ralph 按价格表估算。默认值为 gpt-5.6-sol 标准档（每百万 token：输入 $5、缓存命中 $0.50、缓存写入 $6.25、输出 $30）；换模型时请自行覆盖。输入超过 272K 的请求走更贵的长上下文档，而事件流并不逐请求暴露这一点，因此长期处于该档的 run 会被低估，除非你调高上述价格。
+- **pi** 按自带的模型价目表逐条消息计价并上报结果，因此 Ralph 直接采用该金额和它给出的真实模型名——无论 pi 配置的是哪个 provider / 模型。pi 的 run 完全忽略 `RALPH_PRICE_*`。
 
-防护措施：单次调用的空闲超时（默认静默 360 秒即终止）和可选的硬超时；命中限流时以专用退出码 75 中止整个循环；每次调用后清扫进程树，回收残留的 dev server / watcher（含 Windows Git Bash 的特殊处理）。Codex 使用 `--json` 且保留正常 session：Ralph 直接从管道实时解析 JSONL，只在内存环形缓冲中保留最近 100 条事件；仅当本次调用失败时，才把这些原始事件写入临时诊断文件。最后的诊断轮可以读取该文件，但不能改仓库（Codex 使用 `--sandbox read-only`，Claude 使用 plan 权限模式）。
+防护措施：单次调用的空闲超时（默认静默 360 秒即终止）和可选的硬超时；命中限流时以专用退出码 75 中止整个循环；每次调用后清扫进程树，回收残留的 dev server / watcher（含 Windows Git Bash 的特殊处理）。Codex 使用 `--json`、pi 使用 `--mode json`，两者都保留各自的正常 session：Ralph 直接从管道实时解析 JSONL，只在内存环形缓冲中保留最近 100 条事件；仅当本次调用失败时，才把这些原始事件写入临时诊断文件。最后的诊断轮可以读取该文件，但不能改仓库（Codex 使用 `--sandbox read-only`，Claude 使用 plan 权限模式）。
+
+pi 的诊断轮防护更弱，这是明知的取舍：pi 自身不提供沙箱，因此 Ralph 只能用手上可控的两件事来约束这一轮——`--exclude-tools edit,write` 摘掉写文件的工具，`--no-approve` 阻止加载项目本地的 pi 扩展。`bash` 必须保留（诊断轮要读 Git 状态），所以「不写文件」这条在 pi 上靠的是 `DIAGNOSE_FAILURE.md` 的约定，而非强制边界。实现轮则以 `pi --approve` 运行，会信任项目本地的 `.pi/` 设置、扩展与技能。
 
 ### 阶段 4 —— merge-back：分支合并回基线
 
@@ -212,7 +215,7 @@ ralph/scripts/orchestrate.sh --tool claude --plan "1 > 2,3 > 4"
 | 参数 / 环境变量 | 默认值 | 含义 |
 |---|---|---|
 | `--run <run_id>` / `RALPH_RUN_ID` | 交互式选择 | 执行哪个 run |
-| `--tool claude\|codex` / `RALPH_TOOL` | `codex` | 用哪个 agent CLI 驱动迭代 |
+| `--tool claude\|codex\|pi` / `RALPH_TOOL` | `codex` | 用哪个 agent CLI 驱动迭代 |
 | `[max_iterations]` | `10` | 正常循环预算；最后一次失败诊断不计入 |
 | `--legacy` | — | 单 run 模式，使用根级 `ralph/prd.json`（无 run 目录） |
 | `RALPH_TOOL_IDLE_TIMEOUT_SECONDS` | `360` | agent 静默多久后终止本次调用 |
@@ -220,8 +223,8 @@ ralph/scripts/orchestrate.sh --tool claude --plan "1 > 2,3 > 4"
 | `RALPH_SHARED_MEMORY_ITEMS` / `RALPH_STORY_PROGRESS_RECORDS` | `40` / `5` | prompt 记忆切片大小 |
 | `RALPH_PROGRESS` | `1` | 交互式终端底部的常驻故事进度栏；设为 `0` 关闭 |
 | `RALPH_PROGRESS_IDLE_MIN` | `30` | agent 静默多少秒后显示空闲计时 |
-| `RALPH_PRICE_INPUT_USD` / `RALPH_PRICE_CACHED_INPUT_USD` | `5` / `0.5` | 每百万 token 美元单价，用于估算 codex 成本 |
-| `RALPH_PRICE_CACHE_WRITE_USD` / `RALPH_PRICE_OUTPUT_USD` | `6.25` / `30` | 每百万 token 美元单价，用于估算 codex 成本 |
+| `RALPH_PRICE_INPUT_USD` / `RALPH_PRICE_CACHED_INPUT_USD` | `5` / `0.5` | 每百万 token 美元单价，用于估算 codex 成本（claude 与 pi 自报金额）|
+| `RALPH_PRICE_CACHE_WRITE_USD` / `RALPH_PRICE_OUTPUT_USD` | `6.25` / `30` | 每百万 token 美元单价，用于估算 codex 成本（claude 与 pi 自报金额）|
 | `RALPH_PRICE_MODEL` | `gpt-5.6-sol` | 估算成本时显示的模型标签 |
 | `RALPH_NOTIFY` / `RALPH_NOTIFY_SOUND` | `1` | 桌面通知 |
 | `RALPH_PLAN` | — | `orchestrate.sh` 的默认计划 |
@@ -268,7 +271,7 @@ npx github:levinhen/ralph-kit doctor
 
 核心 Ralph 循环（`ralph/scripts/`）派生自 [snarktank/ralph](https://github.com/snarktank/ralph)（MIT 协议，原始布局在 `scripts/ralph/` 下）。本 kit 在其基础上增加了：
 
-- 多 agent 支持（`CLAUDE.md` + `CODEX.md` 按 agent 区分的提示词）。
+- 多 agent 支持（`CLAUDE.md` + `CODEX.md` + `PI.md` 按 agent 区分的提示词）。
 - run 作用域布局（`runs/<run_id>/`），含 consolidation 与 merge-back 回合。
 - 配套 Claude Code 技能（`/prd`、`/ralph`）。
 - 一个跨项目保持副本同步的 CLI 安装器。

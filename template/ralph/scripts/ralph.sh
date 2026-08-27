@@ -1,12 +1,11 @@
 #!/bin/bash
 # Ralph Wiggum - Long-running AI agent loop
-# Usage: ./ralph.sh [--run run_id|--legacy] [--tool claude|codex|pi] [max_iterations]
+# Usage: ./ralph.sh [--run run_id|--legacy] [--tool claude|codex|pi]
 
 set -e
 
 # Parse arguments
 TOOL="${RALPH_TOOL:-codex}"
-MAX_ITERATIONS=10
 RUN_ID="${RALPH_RUN_ID:-}"
 USE_LEGACY="false"
 RALPH_NOTIFY="${RALPH_NOTIFY:-1}"
@@ -37,9 +36,13 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     *)
-      # Assume it's max_iterations if it's a number
+      # Ralph used to take a max_iterations budget here, back when a failed
+      # story was retried on the next pass. Failures now end the run through
+      # the diagnosis round, so the number no longer bounds anything a caller
+      # would want bounded - it would only cap how many stories a run can
+      # finish. Accept and ignore it so existing wrappers keep working.
       if [[ "$1" =~ ^[0-9]+$ ]]; then
-        MAX_ITERATIONS="$1"
+        echo "Warning: the max_iterations argument ('$1') is obsolete and ignored."
       fi
       shift
       ;;
@@ -452,7 +455,7 @@ if [[ -n "$CONSOLIDATION_STATE_FILE" ]]; then
   echo "Consolidation state file: $CONSOLIDATION_STATE_FILE"
 fi
 
-echo "Starting Ralph - Tool: $TOOL - Max iterations: $MAX_ITERATIONS"
+echo "Starting Ralph - Tool: $TOOL"
 echo "Tool guard: timeout=${RALPH_TOOL_TIMEOUT_SECONDS:-0}s idle=${RALPH_TOOL_IDLE_TIMEOUT_SECONDS:-360}s"
 # The ledger has to exist before the status ticker forks: the ticker inherits
 # the path and then polls the file for the run's running total.
@@ -465,9 +468,39 @@ PROGRESS_LABEL="$RUN_ID"
 if [[ -z "$PROGRESS_LABEL" && -n "$TARGET_BRANCH" ]]; then
   PROGRESS_LABEL="${TARGET_BRANCH##*/}"
 fi
-ralph_progress_start "$PRD_FILE" "$MAX_ITERATIONS" "$PROGRESS_LABEL"
+ralph_progress_start "$PRD_FILE" "$PROGRESS_LABEL"
 
-for i in $(seq 1 $MAX_ITERATIONS); do
+# Story rounds are self-limiting: a story that does not reach passes=true ends
+# the run through the diagnosis round below, so the loop can only walk forward
+# through the backlog. The wrap-up rounds are the ones that can spin, because
+# each one re-runs its agent until a marker file appears - so they carry their
+# own budgets instead of sharing one iteration cap with the stories.
+MAX_FINALIZE_ROUNDS="${RALPH_MAX_FINALIZE_ROUNDS:-3}"
+MAX_MERGE_BACK_ROUNDS="${RALPH_MAX_MERGE_BACK_ROUNDS:-3}"
+MAX_CONSOLIDATION_ROUNDS="${RALPH_MAX_CONSOLIDATION_ROUNDS:-3}"
+FINALIZE_ROUNDS=0
+MERGE_BACK_ROUNDS=0
+CONSOLIDATION_ROUNDS=0
+
+# Counts every round the loop runs, wrap-up rounds included. Nothing is bounded
+# by it; it exists so the terminal, the progress row, and the diagnosis prompt
+# can all refer to the same round number.
+ROUND=0
+
+wrap_up_budget_exhausted() {
+  local phase="$1"
+  local limit="$2"
+
+  ralph_progress_stop || true
+  echo ""
+  echo "Ralph ran the $phase round $limit times without it completing."
+  echo "Check $PROGRESS_FILE and the output above before rerunning."
+  notify_ralph_needs_attention "$phase did not complete after $limit rounds"
+  exit 1
+}
+
+while true; do
+  ROUND=$((ROUND + 1))
   sync_story_files_to_prd
 
   CURRENT_STORY_ID=$(jq -r '
@@ -478,23 +511,32 @@ for i in $(seq 1 $MAX_ITERATIONS); do
   ' "$PRD_FILE" 2>/dev/null || echo "")
 
   if [[ -n "$CURRENT_STORY_ID" ]]; then
-    ralph_progress_update "working" "$CURRENT_STORY_ID" "$i"
+    ralph_progress_update "working" "$CURRENT_STORY_ID" "$ROUND"
     rm -f "$MERGE_BACK_STATE_FILE"
     [[ -n "$CONSOLIDATION_STATE_FILE" ]] && rm -f "$CONSOLIDATION_STATE_FILE"
+    # Back in the story phase, so the wrap-up markers above were just cleared
+    # and any earlier wrap-up attempt no longer describes the current state.
+    FINALIZE_ROUNDS=0
+    MERGE_BACK_ROUNDS=0
+    CONSOLIDATION_ROUNDS=0
   fi
 
   if [[ -z "$CURRENT_STORY_ID" ]]; then
     if merge_back_needed && ! merge_back_done; then
-      ralph_progress_update "merge-back" "" "$i"
+      ralph_progress_update "merge-back" "" "$ROUND"
       echo ""
       echo "==============================================================="
       echo "  Ralph Merge-Back Round ($TOOL) - $TARGET_BRANCH -> $BASE_BRANCH"
       echo "==============================================================="
 
       if ! target_worktree_clean_for_merge; then
-        ralph_progress_update "finalizing" "" "$i"
+        FINALIZE_ROUNDS=$((FINALIZE_ROUNDS + 1))
+        if [[ "$FINALIZE_ROUNDS" -gt "$MAX_FINALIZE_ROUNDS" ]]; then
+          wrap_up_budget_exhausted "worktree finalization" "$MAX_FINALIZE_ROUNDS"
+        fi
+        ralph_progress_update "finalizing" "" "$ROUND"
         if run_target_worktree_finalization; then
-          echo "Ralph target worktree is clean. The next iteration will start merge-back."
+          echo "Ralph target worktree is clean. The next round will start merge-back."
         fi
         sleep 2
         continue
@@ -510,6 +552,11 @@ for i in $(seq 1 $MAX_ITERATIONS); do
         echo "Ralph merged $TARGET_BRANCH into $BASE_BRANCH. Consolidation round next."
         sleep 2
         continue
+      fi
+
+      MERGE_BACK_ROUNDS=$((MERGE_BACK_ROUNDS + 1))
+      if [[ "$MERGE_BACK_ROUNDS" -gt "$MAX_MERGE_BACK_ROUNDS" ]]; then
+        wrap_up_budget_exhausted "merge-back" "$MAX_MERGE_BACK_ROUNDS"
       fi
 
       MERGE_PROMPT_FILE=$(mktemp)
@@ -555,7 +602,12 @@ EOF
     fi
 
     if consolidation_needed && ! consolidation_done; then
-      ralph_progress_update "consolidating" "" "$i"
+      CONSOLIDATION_ROUNDS=$((CONSOLIDATION_ROUNDS + 1))
+      if [[ "$CONSOLIDATION_ROUNDS" -gt "$MAX_CONSOLIDATION_ROUNDS" ]]; then
+        wrap_up_budget_exhausted "consolidation" "$MAX_CONSOLIDATION_ROUNDS"
+      fi
+
+      ralph_progress_update "consolidating" "" "$ROUND"
       echo ""
       echo "==============================================================="
       echo "  Ralph Consolidation Round ($TOOL) - $RUN_ID -> design-ledger"
@@ -588,7 +640,7 @@ EOF
       CONSOLIDATE_PROMPT_FILE=""
 
       if consolidation_done; then
-        ralph_progress_update "complete" "" "$i"
+        ralph_progress_update "complete" "" "$ROUND"
         archive_consolidated_run
         echo ""
         if merge_back_needed; then
@@ -615,7 +667,7 @@ EOF
       archive_consolidated_run
     fi
 
-    ralph_progress_update "complete" "" "$i"
+    ralph_progress_update "complete" "" "$ROUND"
     echo ""
     echo "Ralph completed all tasks!"
     echo "All stories in $PRD_FILE already have passes=true"
@@ -625,7 +677,7 @@ EOF
 
   echo ""
   echo "==============================================================="
-  echo "  Ralph Iteration $i of $MAX_ITERATIONS ($TOOL) - Target: $CURRENT_STORY_ID"
+  echo "  Ralph Round $ROUND ($TOOL) - Target: $CURRENT_STORY_ID"
   echo "==============================================================="
 
   CURRENT_STORY_FILE="$(story_file_path "$CURRENT_STORY_ID")"
@@ -658,7 +710,7 @@ EOF
 
   sync_story_files_to_prd_after_iteration "$PRE_ITERATION_HEAD"
   FAILED_ROUND_AFTER_HEAD=$(git -C "$ACTIVE_WORKTREE" rev-parse --verify HEAD 2>/dev/null || echo "")
-  ralph_progress_update "checking" "$CURRENT_STORY_ID" "$i"
+  ralph_progress_update "checking" "$CURRENT_STORY_ID" "$ROUND"
 
   STORY_PASSED=$(jq -r --arg story_id "$CURRENT_STORY_ID" '
     .userStories[]
@@ -677,7 +729,7 @@ EOF
   if [[ "$STORY_PASSED" != "true" ]]; then
     echo "Warning: $CURRENT_STORY_ID is still not marked passes=true in $PRD_FILE"
 
-    ralph_progress_update "diagnosing" "$CURRENT_STORY_ID" "$i"
+    ralph_progress_update "diagnosing" "$CURRENT_STORY_ID" "$ROUND"
     echo ""
     echo "==============================================================="
     echo "  Ralph Failure Diagnosis Round ($TOOL) - Target: $CURRENT_STORY_ID"
@@ -689,7 +741,7 @@ EOF
       "$FAILURE_DIAGNOSIS_PROMPT_FILE" \
       "$CURRENT_STORY_ID" \
       "$CURRENT_STORY_FILE" \
-      "$i" \
+      "$ROUND" \
       "$FAILED_ROUND_TOOL_EXIT_CODE" \
       "$FAILED_ROUND_SAW_COMPLETION" \
       "$PRE_ITERATION_HEAD" \
@@ -731,12 +783,12 @@ EOF
   fi
 
   if [[ "$ALL_COMPLETE" == "true" ]] && merge_back_needed; then
-    echo "All stories are marked complete in $PRD_FILE. The next iteration will run the dedicated merge-back round."
+    echo "All stories are marked complete in $PRD_FILE. The next round will run the dedicated merge-back round."
   elif [[ "$ALL_COMPLETE" == "true" ]]; then
-    ralph_progress_update "complete" "" "$i"
+    ralph_progress_update "complete" "" "$ROUND"
     echo ""
     echo "Ralph completed all tasks!"
-    echo "Completed at iteration $i of $MAX_ITERATIONS"
+    echo "Completed at round $ROUND"
     notify_ralph_stories_completed
     exit 0
   fi
@@ -747,12 +799,7 @@ EOF
     echo "Warning: Tool reported COMPLETE, but Ralph still has remaining work. Continuing."
   fi
 
-  echo "Iteration $i complete. Continuing..."
+  echo "Round $ROUND complete. Continuing..."
   sleep 2
 done
 
-echo ""
-echo "Ralph reached max iterations ($MAX_ITERATIONS) without completing all tasks."
-echo "Check $PROGRESS_FILE for status."
-notify_ralph_needs_attention
-exit 1

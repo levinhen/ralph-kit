@@ -6,7 +6,7 @@
   "author": "levinhen",
   "type": "module",
   "scripts": {
-    "test": "bash tests/failure-diagnosis.sh && bash tests/pi-tool.sh"
+    "test": "bash tests/failure-diagnosis.sh && bash tests/pi-tool.sh && bash tests/story-budget.sh"
   },
   "bin": {
     "ralph-kit": "bin/ralph-kit.mjs"

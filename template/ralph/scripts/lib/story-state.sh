@@ -264,7 +264,7 @@ make_failure_diagnosis_prompt() {
 
 ## Failed Round Context
 
-- Failed normal iteration: $iteration of $MAX_ITERATIONS
+- Failed normal round: $iteration
 - Tool: $TOOL
 - Tool exit code: $failed_tool_exit_code
 - Tool reported a completed turn: $failed_tool_saw_completion

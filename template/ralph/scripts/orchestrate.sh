@@ -3,7 +3,7 @@
 #
 # Usage:
 #   ./orchestrate.sh [--tool claude|codex|pi] [--plan "1 > 2,3 > 4"]
-#                    [--dry-run] [max_iterations]
+#                    [--dry-run]
 #
 # Plan syntax:
 #   ','  parallel within the same stage
@@ -31,7 +31,6 @@
 set -e
 
 TOOL="${RALPH_TOOL:-codex}"
-MAX_ITERATIONS=""
 PLAN_INPUT="${RALPH_PLAN:-}"
 DRY_RUN="false"
 RALPH_RATE_LIMIT_EXIT_CODE=75
@@ -63,8 +62,10 @@ while [[ $# -gt 0 ]]; do
       exit 0
       ;;
     *)
+      # ralph.sh no longer takes a max_iterations budget; swallow the old
+      # positional argument here so existing wrappers keep working.
       if [[ "$1" =~ ^[0-9]+$ ]]; then
-        MAX_ITERATIONS="$1"
+        echo "Warning: the max_iterations argument ('$1') is obsolete and ignored." >&2
       else
         echo "Error: Unknown argument '$1'" >&2
         exit 1
@@ -367,7 +368,6 @@ execute_stage() {
 
   if [[ ${#runs[@]} -eq 1 ]]; then
     local args=(--run "${runs[0]}" --tool "$TOOL")
-    [[ -n "$MAX_ITERATIONS" ]] && args+=("$MAX_ITERATIONS")
     "$RALPH_SCRIPT" "${args[@]}" &
     ORCH_PIDS=("$!")
     if wait "${ORCH_PIDS[0]}"; then
@@ -394,7 +394,6 @@ execute_stage() {
     echo "  -> $run_id  (log: $log_file)"
 
     local args=(--run "$run_id" --tool "$TOOL")
-    [[ -n "$MAX_ITERATIONS" ]] && args+=("$MAX_ITERATIONS")
 
     "$RALPH_SCRIPT" "${args[@]}" >"$log_file" 2>&1 &
     pids+=($!)

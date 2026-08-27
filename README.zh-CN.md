@@ -44,7 +44,7 @@ ralph/runs/<run_id>/prd.json          机器可读的运行定义
         ▼
 .worktrees/<run_id>（隔离的 git worktree，检出分支 ralph/<feature>）
         │
-        │  迭代循环——每个故事一个全新 agent：
+        │  轮次循环——每个故事一个全新 agent：
         │    1. 取第一个 passes=false 的故事
         │    2. prompt = agent 手册 + 故事 JSON + 记忆切片
         │    3. 启动全新的 claude / codex / pi 进程
@@ -115,7 +115,7 @@ ralph/scripts/ralph.sh --run <run_id> --tool claude 20   # 或 --tool codex（�
 3. 在 `.worktrees/<run_id>` 创建（或复用）git worktree，检出 `branchName`（如 `ralph/<feature>`，从基线分支创建），并在缺失时把 run 的输入文件复制进去。整个 run 都发生在 worktree 里——你的主工作区不受影响。
 4. 把 `prd.json` 拆成单故事文件 `stories/US-xxx.json`，并把根级 `userNeed` 复制进每个文件。
 
-**每次迭代：**
+**每个故事轮：**
 
 1. 先把 `stories/*.json` 同步回 `prd.json`，然后取**第一个 `passes != true` 的故事**。
 2. 拼装一次性 prompt，内容包括：
@@ -123,17 +123,17 @@ ralph/scripts/ralph.sh --run <run_id> --tool claude 20   # 或 --tool codex（�
    - run 上下文（分支、worktree、各文件路径）；
    - **仅当前故事的 JSON**（并明确告知 agent 不要去读完整 PRD）；
    - **记忆切片**：最近约 40 条 shared-memory 条目 + 该故事最近约 5 条进度记录。
-3. 在 worktree 里启动一个**全新的 agent 进程**（`claude --print …`、`codex exec …` 或 `pi --print --mode json …`，跳过权限确认——本循环就是为无人值守设计的）。没有聊天历史，没有上一轮迭代的上下文。
+3. 在 worktree 里启动一个**全新的 agent 进程**（`claude --print …`、`codex exec …` 或 `pi --print --mode json …`，跳过权限确认——本循环就是为无人值守设计的）。没有聊天历史，没有上一轮的上下文。
 4. agent 按手册行事：只实现**这一个故事**（只做 `Covers:` 指明的那一块），跑项目的质量检查（typecheck/lint/测试），把故事文件改为 `passes: true` 并写下 `notes`，用 `append-progress-json.sh` 追加结构化进度记录（一行 JSON 写进 `progress/<story_id>.jsonl`，可选 `--shared-memory` 沉淀可复用模式），最后以 `feat: [US-xxx] - [标题]` 提交全部变更。
    每个 agent 回合都会收到统一的 **Round Commit Contract**：本轮产生的所有预期仓库产物必须在本轮结束前提交，不能留给后续 story、finalization、merge-back 或 consolidation 代为提交；若只形成了安全且完整的阶段性成果，则提交 checkpoint，但仍保持故事未完成。运行时 marker、临时诊断文件和无产物的幂等重试不要求空提交。
 5. 循环把故事状态同步回 `prd.json`（安全时 amend 进故事提交），并且**只认文件**。当前故事变为 `passes: true` 才正常进入下一故事；只要仍是 `passes != true`，无论 agent 口头上如何声明，都不会再重跑实现轮。
-6. 未完成的故事只会额外触发一次专门的**失败诊断轮**（`DIAGNOSE_FAILURE.md`）。它会拿到当前故事、近期进度、前后 Git HEAD、上一轮 agent 消息，以及可用时的原始失败事件；诊断 agent 以只读权限运行，把结构化的根因报告打印到终端后退出 `1`，后续正常轮次全部跳过。这个特别轮次不占 `max_iterations`。
-7. 只有成功的故事轮会继续，直到所有故事通过，或达到 `max_iterations`（默认 10）。
+6. 未完成的故事只会额外触发一次专门的**失败诊断轮**（`DIAGNOSE_FAILURE.md`）。它会拿到当前故事、近期进度、前后 Git HEAD、上一轮 agent 消息，以及可用时的原始失败事件；诊断 agent 以只读权限运行，把结构化的根因报告打印到终端后退出 `1`，后续轮次全部跳过。
+7. 只有成功的故事轮会继续，直到所有故事通过。循环没有总轮数预算：故事一旦失败就在第 6 步终止整次运行，所以故事循环只会沿着待办列表单向前进。真正可能自我重试的是收尾轮，它们各自带一个小预算（见下方 `RALPH_MAX_*_ROUNDS`）。
 
 交互式终端的最底部会常驻一条进度栏，上方的 agent 日志照常滚动：
 
 ```
-Ralph:20260817-a [█████░░░░░░░░░░░] 3/8 done | US-004 | working 4m12s | iter 7/30 | total 1h06m | eta ~2h45m | ~$4.18 | 3.7M tok | 补齐成本统计
+Ralph:20260817-a [█████░░░░░░░░░░░] 3/8 done | US-004 | working 4m12s | round 7 | total 1h06m | eta ~2h45m | ~$4.18 | 3.7M tok | 补齐成本统计
 ```
 
 各段按优先级依次追加，终端越窄就从右侧越先脱落，因此 40 列的窗口里仍能看到进度条和当前故事。run id（legacy 模式下为分支名）从 90 列起显示——并行编排开多个窗口时，它是区分各个 run 的唯一标识。
@@ -192,7 +192,7 @@ pi 的诊断轮防护更弱，这是明知的取舍：pi 自身不提供沙箱�
 
 ### 无记忆的 agent 之间如何共享知识
 
-每次迭代都是冷启动，所以一切记忆都是文件：
+每一轮都是冷启动，所以一切记忆都是文件：
 
 | 记忆载体 | 作用域 | 写入者 | 是否注入 prompt？ |
 |---|---|---|---|
@@ -215,21 +215,21 @@ ralph/scripts/orchestrate.sh --tool claude --plan "1 > 2,3 > 4"
 | 参数 / 环境变量 | 默认值 | 含义 |
 |---|---|---|
 | `--run <run_id>` / `RALPH_RUN_ID` | 交互式选择 | 执行哪个 run |
-| `--tool claude\|codex\|pi` / `RALPH_TOOL` | `codex` | 用哪个 agent CLI 驱动迭代 |
-| `[max_iterations]` | `10` | 正常循环预算；最后一次失败诊断不计入 |
+| `--tool claude\|codex\|pi` / `RALPH_TOOL` | `codex` | 用哪个 agent CLI 驱动每一轮 |
 | `--legacy` | — | 单 run 模式，使用根级 `ralph/prd.json`（无 run 目录） |
 | `RALPH_TOOL_IDLE_TIMEOUT_SECONDS` | `360` | agent 静默多久后终止本次调用 |
 | `RALPH_TOOL_TIMEOUT_SECONDS` | `0`（关闭） | 单次调用硬上限 |
 | `RALPH_SHARED_MEMORY_ITEMS` / `RALPH_STORY_PROGRESS_RECORDS` | `40` / `5` | prompt 记忆切片大小 |
 | `RALPH_PROGRESS` | `1` | 交互式终端底部的常驻故事进度栏；设为 `0` 关闭 |
 | `RALPH_PROGRESS_IDLE_MIN` | `30` | agent 静默多少秒后显示空闲计时 |
+| `RALPH_MAX_FINALIZE_ROUNDS` / `RALPH_MAX_MERGE_BACK_ROUNDS` / `RALPH_MAX_CONSOLIDATION_ROUNDS` | 各 `3` | 单个收尾轮最多自我重试几次，超出就停下 |
 | `RALPH_PRICE_INPUT_USD` / `RALPH_PRICE_CACHED_INPUT_USD` | `5` / `0.5` | 每百万 token 美元单价，用于估算 codex 成本（claude 与 pi 自报金额）|
 | `RALPH_PRICE_CACHE_WRITE_USD` / `RALPH_PRICE_OUTPUT_USD` | `6.25` / `30` | 每百万 token 美元单价，用于估算 codex 成本（claude 与 pi 自报金额）|
 | `RALPH_PRICE_MODEL` | `gpt-5.6-sol` | 估算成本时显示的模型标签 |
 | `RALPH_NOTIFY` / `RALPH_NOTIFY_SOUND` | `1` | 桌面通知 |
 | `RALPH_PLAN` | — | `orchestrate.sh` 的默认计划 |
 
-退出码：`0` 全部完成，`1` 达到迭代上限/故事失败且已诊断，`75` 命中限流，`124` 工具超时。
+退出码：`0` 全部完成，`1` 故事失败且已诊断/某个收尾轮用尽预算，`75` 命中限流，`124` 工具超时。
 
 ## 安装
 

@@ -195,10 +195,10 @@ notify_ralph_stories_completed() {
 }
 
 notify_ralph_needs_attention() {
-  local reason="${1:-reached max iterations ($MAX_ITERATIONS)}"
+  local reason="${1:-a round did not complete}"
   notify_ralph "Ralph needs attention" "run $RUN_ID_LABEL: $reason"
 }
 
 notify_ralph_rate_limited() {
-  notify_ralph "Ralph paused" "run $RUN_ID_LABEL: 429/rate limit detected; skipped remaining iterations"
+  notify_ralph "Ralph paused" "run $RUN_ID_LABEL: 429/rate limit detected; skipped the remaining rounds"
 }

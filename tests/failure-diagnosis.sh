@@ -99,7 +99,7 @@ PATH="$FAKE_BIN:$PATH" \
   FAKE_CODEX_PROMPTS_DIR="$PROMPTS_DIR" \
   RALPH_NOTIFY=0 \
   RALPH_PROGRESS=0 \
-  bash "$FIXTURE_REPO/ralph/scripts/ralph.sh" --legacy --tool codex 5 \
+  bash "$FIXTURE_REPO/ralph/scripts/ralph.sh" --legacy --tool codex \
   > "$OUTPUT_FILE" 2>&1
 run_status=$?
 set -e
@@ -136,8 +136,8 @@ grep -q 'Ralph Failure Diagnosis Round' "$OUTPUT_FILE"
 grep -q 'The story remained passes=false.' "$OUTPUT_FILE"
 grep -q 'Ralph stopped after diagnosing US-001' "$OUTPUT_FILE"
 
-if grep -q 'Ralph Iteration 2 of' "$OUTPUT_FILE"; then
-  echo "Ralph incorrectly started a second implementation iteration" >&2
+if grep -q 'Ralph Round 2 ' "$OUTPUT_FILE"; then
+  echo "Ralph incorrectly started a second implementation round" >&2
   cat "$OUTPUT_FILE" >&2
   exit 1
 fi

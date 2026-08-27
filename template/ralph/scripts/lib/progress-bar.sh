@@ -11,7 +11,6 @@ RALPH_PROGRESS_ACTIVE="false"
 RALPH_PROGRESS_ROWS=0
 RALPH_PROGRESS_COLS=0
 RALPH_PROGRESS_PRD_FILE=""
-RALPH_PROGRESS_MAX_ITERATIONS=0
 RALPH_PROGRESS_STATE_FILE=""
 RALPH_PROGRESS_TICKER_PID=""
 RALPH_PROGRESS_TICK_SECONDS="${RALPH_PROGRESS_TICK_SECONDS:-2}"
@@ -356,7 +355,7 @@ ralph_progress_render() {
   fi
 
   if [[ "$iteration" -gt 0 ]]; then
-    ralph_progress_add " | iter ${iteration}/${RALPH_PROGRESS_MAX_ITERATIONS}" || true
+    ralph_progress_add " | round ${iteration}" || true
   fi
   if [[ "$run_elapsed" -gt 0 ]]; then
     ralph_progress_add " | total $(ralph_progress_duration "$run_elapsed")" || true
@@ -439,8 +438,7 @@ ralph_progress_stop_ticker() {
 
 ralph_progress_start() {
   local prd_file="$1"
-  local max_iterations="$2"
-  local run_label="${3:-}"
+  local run_label="${2:-}"
   local now
 
   ralph_progress_supported || return 0
@@ -453,7 +451,6 @@ ralph_progress_start() {
   [[ "$now" =~ ^[0-9]+$ ]] || now=0
 
   RALPH_PROGRESS_PRD_FILE="$prd_file"
-  RALPH_PROGRESS_MAX_ITERATIONS="$max_iterations"
   RALPH_PROGRESS_RUN_LABEL="$run_label"
   RALPH_PROGRESS_ACTIVE="true"
 

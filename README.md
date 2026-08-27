@@ -46,7 +46,7 @@ ralph/runs/<run_id>/prd.json          machine-readable run
         ▼
 .worktrees/<run_id>  (isolated git worktree on branch ralph/<feature>)
         │
-        │  iteration loop — one fresh agent per story:
+        │  round loop — one fresh agent per story:
         │    1. pick the first story with passes=false
         │    2. prompt = agent playbook + story JSON + memory slice
         │    3. spawn a fresh claude / codex / pi process
@@ -117,7 +117,7 @@ ralph/scripts/ralph.sh --run <run_id> --tool claude 20   # or --tool codex (defa
 3. Create (or reuse) a git worktree at `.worktrees/<run_id>` checked out on `branchName` (e.g. `ralph/<feature>`), branched from the base branch, and copy the run's inputs into it if they aren't there yet. The whole run happens inside the worktree — your main checkout stays untouched.
 4. Split `prd.json` into per-story files `stories/US-xxx.json`, copying the root `userNeed` into each.
 
-**Each iteration:**
+**Each story round:**
 
 1. Sync `stories/*.json` back into `prd.json`, then pick the **first story with `passes != true`**.
 2. Assemble a one-shot prompt from:
@@ -125,17 +125,17 @@ ralph/scripts/ralph.sh --run <run_id> --tool claude 20   # or --tool codex (defa
    - run context (branches, worktree, file paths),
    - the **current story JSON only** (the agent is told not to read the full PRD),
    - a **memory slice**: the last ~40 shared-memory items plus the last ~5 progress records of this story.
-3. Spawn a **fresh agent process** in the worktree (`claude --print …`, `codex exec …`, or `pi --print --mode json …`, permission prompts bypassed — the loop is built for unattended runs). No chat history, no previous-iteration context.
+3. Spawn a **fresh agent process** in the worktree (`claude --print …`, `codex exec …`, or `pi --print --mode json …`, permission prompts bypassed — the loop is built for unattended runs). No chat history, no previous-round context.
 4. The agent, per its playbook: implements **exactly that one story** (only the slice named in `Covers:`), runs the project's quality checks (typecheck/lint/tests), flips the story file to `passes: true` and writes `notes`, appends a structured progress record via `append-progress-json.sh` (one JSON line into `progress/<story_id>.jsonl`, plus optional `--shared-memory` items for reusable patterns), and commits everything as `feat: [US-xxx] - [Title]`.
    Every agent round also receives a shared **Round Commit Contract**: all intended repository artifacts produced by that round must be committed before it ends, rather than being left for a later story, finalization, merge-back, or consolidation round. A safe, coherent partial result is committed as a checkpoint while the story remains incomplete. Runtime markers, temporary diagnostics, and artifact-free idempotent retries do not require empty commits.
 5. The loop syncs story state back into `prd.json` (amending it into the story commit when safe) and **trusts only the file**. If the current story now has `passes: true`, Ralph advances normally. If it still has `passes != true`—regardless of what the agent claimed—Ralph does not retry the implementation round.
-6. An incomplete story triggers exactly one dedicated **failure diagnosis round** (`DIAGNOSE_FAILURE.md`). It receives the story, recent progress, Git heads, the previous agent message, and raw tool events when available. The diagnosis runs with read-only agent permissions, prints a structured root-cause report to the terminal, and exits `1`; every later normal iteration is skipped. This special round is outside `max_iterations`.
-7. Successful story rounds repeat until all stories pass or `max_iterations` (default 10) is reached.
+6. An incomplete story triggers exactly one dedicated **failure diagnosis round** (`DIAGNOSE_FAILURE.md`). It receives the story, recent progress, Git heads, the previous agent message, and raw tool events when available. The diagnosis runs with read-only agent permissions, prints a structured root-cause report to the terminal, and exits `1`; every later round is skipped.
+7. Successful story rounds repeat until every story passes. There is no round budget: because a failed story ends the run at step 6, the story loop can only move forward through the backlog. The wrap-up rounds are the ones that can retry themselves, so each carries its own small budget (see `RALPH_MAX_*_ROUNDS` below).
 
 Interactive terminals keep a progress bar pinned to the bottom row while agent logs scroll above it:
 
 ```
-Ralph:20260817-a [█████░░░░░░░░░░░] 3/8 done | US-004 | working 4m12s | iter 7/30 | total 1h06m | eta ~2h45m | ~$4.18 | 3.7M tok | Add token accounting
+Ralph:20260817-a [█████░░░░░░░░░░░] 3/8 done | US-004 | working 4m12s | round 7 | total 1h06m | eta ~2h45m | ~$4.18 | 3.7M tok | Add token accounting
 ```
 
 Segments are added in priority order and the row degrades from the right as the terminal narrows, so a 40-column window still shows the bar and the current story. The run id (or branch, in legacy mode) appears from 90 columns up — it is what tells parallel runs apart when several orchestrator windows are open.
@@ -194,7 +194,7 @@ The loop exits 0 and sends a desktop notification.
 
 ### How memoryless agents share knowledge
 
-Every iteration starts cold, so all memory is files:
+Every round starts cold, so all memory is files:
 
 | Memory | Scope | Written by | Injected into prompts? |
 |---|---|---|---|
@@ -217,21 +217,21 @@ Lists incomplete runs, numbers them, and executes a staged plan: `,` = parallel 
 | Flag / env | Default | Meaning |
 |---|---|---|
 | `--run <run_id>` / `RALPH_RUN_ID` | interactive selector | which run to execute |
-| `--tool claude\|codex\|pi` / `RALPH_TOOL` | `codex` | which agent CLI drives iterations |
-| `[max_iterations]` | `10` | normal loop budget; the one final failure diagnosis is extra |
+| `--tool claude\|codex\|pi` / `RALPH_TOOL` | `codex` | which agent CLI drives rounds |
 | `--legacy` | — | single-run mode at root `ralph/prd.json` (no run dirs) |
 | `RALPH_TOOL_IDLE_TIMEOUT_SECONDS` | `360` | kill an agent invocation after this much silence |
 | `RALPH_TOOL_TIMEOUT_SECONDS` | `0` (off) | hard cap per invocation |
 | `RALPH_SHARED_MEMORY_ITEMS` / `RALPH_STORY_PROGRESS_RECORDS` | `40` / `5` | prompt memory slice sizes |
 | `RALPH_PROGRESS` | `1` | pinned story progress in interactive terminals; set to `0` to disable |
 | `RALPH_PROGRESS_IDLE_MIN` | `30` | seconds of agent silence before the idle clock appears |
+| `RALPH_MAX_FINALIZE_ROUNDS` / `RALPH_MAX_MERGE_BACK_ROUNDS` / `RALPH_MAX_CONSOLIDATION_ROUNDS` | `3` each | how often a wrap-up round may retry itself before Ralph stops |
 | `RALPH_PRICE_INPUT_USD` / `RALPH_PRICE_CACHED_INPUT_USD` | `5` / `0.5` | USD per 1M tokens, used to estimate codex cost (claude and pi report their own) |
 | `RALPH_PRICE_CACHE_WRITE_USD` / `RALPH_PRICE_OUTPUT_USD` | `6.25` / `30` | USD per 1M tokens, used to estimate codex cost (claude and pi report their own) |
 | `RALPH_PRICE_MODEL` | `gpt-5.6-sol` | model label shown next to an estimated cost |
 | `RALPH_NOTIFY` / `RALPH_NOTIFY_SOUND` | `1` | desktop notifications |
 | `RALPH_PLAN` | — | default plan for `orchestrate.sh` |
 
-Exit codes: `0` complete, `1` max iterations reached / story failed after diagnosis, `75` rate-limited, `124` tool timeout.
+Exit codes: `0` complete, `1` story failed after diagnosis / a wrap-up round exhausted its budget, `75` rate-limited, `124` tool timeout.
 
 ## Install
 

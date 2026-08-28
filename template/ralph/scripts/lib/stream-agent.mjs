@@ -308,6 +308,50 @@ function piToolHint(args) {
   return ''
 }
 
+// A pi extension puts two kinds of material into this same stream: messages it
+// injects to steer the main agent (role "custom"), and session entries that
+// record what the extension itself did. Headless runs have no TUI, so these
+// events are the only trace an extension leaves - without them a turn visibly
+// changes course with nothing in the log to explain why.
+function piCustomText(content) {
+  if (typeof content === 'string') return content
+  if (!Array.isArray(content)) return ''
+
+  return content
+    .filter((block) => block?.type === 'text' && typeof block.text === 'string' && block.text !== '')
+    .map((block) => block.text)
+    .join('\n')
+}
+
+// pi-shadow-mind records every scheduling decision as a session entry, most of
+// them being a heartbeat that decided to do nothing. Only the entries that
+// changed what the run did earn a line; the rolls behind the rest stay in the
+// session file for `/shadow`.
+function shadowMindEventLine(entryData) {
+  const event = entryData && typeof entryData === 'object' ? entryData : {}
+  const detail = event.data && typeof event.data === 'object' ? event.data : {}
+  const shadow = detail.shadowId ?? 'shadow'
+
+  switch (event.kind) {
+    case 'run-start':
+      return `\u00b7 shadow ${shadow} started${detail.model ? ` on ${detail.model}` : ''}`
+    case 'run-end': {
+      const durationMs = Number(detail.durationMs)
+      const took = Number.isFinite(durationMs) ? ` after ${(durationMs / 1000).toFixed(1)}s` : ''
+      const error = detail.error ? `: ${detail.error}` : ''
+      return `\u00b7 shadow ${shadow} ${detail.reason ?? 'ended'}${took}${error}`
+    }
+    case 'headless-drain-start':
+      return `\u00b7 waiting for ${detail.active ?? '?'} shadow run(s) to finish`
+    case 'headless-drain-timeout':
+      return '\u00b7 shadow drain timed out; remaining runs aborted'
+    case 'runs-aborted':
+      return `\u00b7 ${detail.count ?? '?'} shadow run(s) aborted (${detail.reason ?? 'unknown'})`
+    default:
+      return ''
+  }
+}
+
 // pi keeps the stream open across its own auto-retries, so whether the
 // invocation landed is decided by the last assistant message, not the first.
 let piLastStopReason = ''
@@ -321,6 +365,17 @@ function transformPi(event) {
       break
     case 'message_end': {
       const message = event.message || {}
+
+      // An extension-injected message is shown but never folded into
+      // assistantText: that field stands in for pi's closing message, and a
+      // shadow report is not the agent's own answer.
+      if (message.role === 'custom') {
+        if (message.display === false) break
+        const text = piCustomText(message.content)
+        if (text) lines.push(`[${message.customType || 'custom'}]\n${text}`)
+        break
+      }
+
       if (message.role !== 'assistant') break
 
       recordPiUsage(message)
@@ -346,6 +401,15 @@ function transformPi(event) {
             lines.push(block.text)
           }
         }
+      }
+      break
+    }
+    case 'entry_appended': {
+      const entry = event.entry || {}
+      if (entry.type !== 'custom') break
+      if (entry.customType === 'shadow-mind-event') {
+        const line = shadowMindEventLine(entry.data)
+        if (line) lines.push(line)
       }
       break
     }

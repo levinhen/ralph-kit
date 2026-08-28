@@ -31,6 +31,7 @@ sync_root_ralph_inputs() {
   copy_state_if_missing_base "$ROOT_STATE_FILE" "$STATE_FILE"
   copy_file_if_exists "$ROOT_CLAUDE_PROMPT_FILE" "$CLAUDE_PROMPT_FILE"
   copy_file_if_exists "$ROOT_CODEX_PROMPT_FILE" "$CODEX_PROMPT_FILE"
+  copy_file_if_exists "$ROOT_PI_PROMPT_FILE" "$PI_PROMPT_FILE"
   copy_file_if_exists "$MERGE_BACK_PROMPT_FILE" "$ACTIVE_MERGE_BACK_PROMPT_FILE"
 }
 

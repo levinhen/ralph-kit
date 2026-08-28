@@ -370,13 +370,17 @@ execute_stage() {
     local args=(--run "${runs[0]}" --tool "$TOOL")
     "$RALPH_SCRIPT" "${args[@]}" &
     ORCH_PIDS=("$!")
-    if wait "${ORCH_PIDS[0]}"; then
-      ORCH_PIDS=()
+    # Capture the child's status directly. `if wait ...; then ...; fi` cannot be
+    # used here: an `if` whose condition fails and that has no `else` branch
+    # exits 0, so reading $? after `fi` reports success for a failed run and the
+    # orchestrator walks on to the next stage.
+    local rc=0
+    wait "${ORCH_PIDS[0]}" || rc=$?
+    ORCH_PIDS=()
+    if [[ "$rc" -eq 0 ]]; then
       echo "[stage $stage_num] ${runs[0]}: ok"
       return 0
     fi
-    local rc=$?
-    ORCH_PIDS=()
     if [[ "$rc" -eq "$RALPH_RATE_LIMIT_EXIT_CODE" ]]; then
       echo "[stage $stage_num] ${runs[0]}: rate-limited (exit $rc)" >&2
       return "$RALPH_RATE_LIMIT_EXIT_CODE"
@@ -403,24 +407,52 @@ execute_stage() {
 
   ORCH_PIDS=("${pids[@]}")
 
-  local stage_failed=0 stage_rate_limited=0 rc
+  local stage_failed=0 stage_rate_limited=0 rc reaped
+  local pending=() still=()
   local k=0
   while [[ $k -lt ${#pids[@]} ]]; do
-    if wait "${pids[$k]}"; then
-      echo "  [stage $stage_num] ${names[$k]}: ok"
-    else
-      rc=$?
-      if [[ "$rc" -eq "$RALPH_RATE_LIMIT_EXIT_CODE" ]]; then
+    pending+=("$k")
+    k=$((k + 1))
+  done
+
+  # Reap in completion order rather than launch order. Waiting on pids[0] first
+  # would hide a later sibling's failure until every earlier run has finished,
+  # so the failure is recorded the moment the run exits (after its own diagnosis
+  # round). Siblings still run to completion; only the next stage is withheld.
+  while [[ ${#pending[@]} -gt 0 ]]; do
+    still=()
+    reaped=0
+    for k in "${pending[@]}"; do
+      if kill -0 "${pids[$k]}" 2>/dev/null; then
+        still+=("$k")
+        continue
+      fi
+      reaped=1
+      rc=0
+      wait "${pids[$k]}" || rc=$?
+      if [[ "$rc" -eq 0 ]]; then
+        echo "  [stage $stage_num] ${names[$k]}: ok"
+      elif [[ "$rc" -eq "$RALPH_RATE_LIMIT_EXIT_CODE" ]]; then
         echo "  [stage $stage_num] ${names[$k]}: rate-limited (exit $rc, see ${logs[$k]})" >&2
         stage_rate_limited=1
         stage_failed=1
-        terminate_orchestrated_runs
-        break
+      else
+        echo "  [stage $stage_num] ${names[$k]}: FAILED (exit $rc, see ${logs[$k]})" >&2
+        stage_failed=1
       fi
-      echo "  [stage $stage_num] ${names[$k]}: FAILED (exit $rc, see ${logs[$k]})" >&2
-      stage_failed=1
+    done
+
+    # A rate limit is the one failure that cuts the stage short: the remaining
+    # runs would only burn requests against the same exhausted quota.
+    if [[ "$stage_rate_limited" -eq 1 ]]; then
+      terminate_orchestrated_runs
+      break
     fi
-    k=$((k + 1))
+
+    pending=("${still[@]}")
+    if [[ ${#pending[@]} -gt 0 && "$reaped" -eq 0 ]]; then
+      sleep 1
+    fi
   done
 
   ORCH_PIDS=()

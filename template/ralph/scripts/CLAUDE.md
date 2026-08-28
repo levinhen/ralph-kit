@@ -77,7 +77,11 @@ Only update CLAUDE.md if you have **genuinely reusable knowledge** that would he
 
 - ALL commits must pass your project's quality checks (typecheck, lint, test)
 - Do NOT commit broken code
-- Keep changes focused and minimal
+- Keep changes focused and minimal. Content length drives how long an iteration
+  takes, so write what the story's `Covers:` slice requires and nothing more: no
+  speculative abstractions, no defensive branches for unreachable states, no
+  extension points with no current caller. A single new file heading past ~400
+  lines is a signal to split it along a real seam.
 - Follow existing code patterns
 - During merge-back rounds, if your project uses ordered/numbered migration files (e.g., timestamped SQL migrations), check for filename collisions against the base branch and renumber newly merged migrations to unique later versions before committing.
 

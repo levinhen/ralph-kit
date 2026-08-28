@@ -98,6 +98,26 @@ If `setsid` is unavailable, use `nohup <cmd> > /tmp/ralph-server.log 2>&1 < /dev
 
 NEVER leave a `npm run dev`, `vite`, `next dev`, watcher, or local server running when you finish. Ralph runs a safety-net cleanup after each invocation — on Windows it terminates the tool's whole process tree and sweeps any process whose command line points into the worktree — but that is a backstop, not a substitute for stopping your own processes.
 
+## Output Efficiency
+
+Nearly all of an iteration's wall clock goes into generating tokens; tool
+execution is negligible next to it. Two habits decide how long a story takes.
+
+**Batch independent tool calls into one turn.** Several calls issued together
+cost about what one costs; spread across separate turns they cost that much
+each. Whenever the next calls do not need each other's results — inspecting
+several files, patching different files or separate regions of one file,
+running independent searches — emit them in a single turn. Serialize only when
+a call genuinely depends on the previous result.
+
+**Keep each generated file small.** Content length translates almost directly
+into elapsed time, so a large new file is the most expensive thing you can
+produce. Write what the story's `Covers:` slice actually requires and nothing
+more: no speculative abstractions, no defensive branches for states the code
+cannot reach, no extension points with no current caller. A single new file
+heading past ~400 lines is a signal to split it along a real seam, not to keep
+generating.
+
 ## Execution Rules
 
 - Work on one story per iteration.

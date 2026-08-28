@@ -15,12 +15,7 @@ _RALPH_OVERLAY_EXCLUDES=(
   ':(exclude)ralph/progress'
   ':(exclude)ralph/stories'
   ':(exclude)ralph/state.json'
-  ':(exclude)ralph/scripts/CLAUDE.md'
-  ':(exclude)ralph/scripts/CODEX.md'
-  ':(exclude)ralph/scripts/MERGE_BACK.md'
-  ':(exclude)ralph/scripts/CONSOLIDATE.md'
-  ':(exclude)ralph/scripts/ralph.sh'
-  ':(exclude)ralph/scripts/lib'
+  ':(exclude)ralph/scripts'
 )
 
 sync_root_ralph_inputs() {
@@ -29,10 +24,6 @@ sync_root_ralph_inputs() {
   copy_dir_if_missing "$ROOT_PROGRESS_DIR" "$PROGRESS_DIR"
   copy_dir_if_missing "$(dirname "$ROOT_PRD_FILE")/stories" "$STORIES_DIR"
   copy_state_if_missing_base "$ROOT_STATE_FILE" "$STATE_FILE"
-  copy_file_if_exists "$ROOT_CLAUDE_PROMPT_FILE" "$CLAUDE_PROMPT_FILE"
-  copy_file_if_exists "$ROOT_CODEX_PROMPT_FILE" "$CODEX_PROMPT_FILE"
-  copy_file_if_exists "$ROOT_PI_PROMPT_FILE" "$PI_PROMPT_FILE"
-  copy_file_if_exists "$MERGE_BACK_PROMPT_FILE" "$ACTIVE_MERGE_BACK_PROMPT_FILE"
 }
 
 root_overlay_status() {

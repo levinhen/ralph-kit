@@ -40,7 +40,7 @@ run_target_worktree_finalization() {
   git -C "$ACTIVE_WORKTREE" status --short
 
   FINALIZE_PROMPT_FILE=$(mktemp)
-  make_prompt_with_run_context "$ACTIVE_PROMPT_FILE" "$FINALIZE_PROMPT_FILE"
+  make_prompt_with_run_context "$TOOL_PROMPT_FILE" "$FINALIZE_PROMPT_FILE"
   cat <<EOF >> "$FINALIZE_PROMPT_FILE"
 
 ## Final Worktree Consolidation Round

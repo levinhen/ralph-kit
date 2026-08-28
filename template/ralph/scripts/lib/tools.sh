@@ -4,30 +4,10 @@ RALPH_LIB_DIR="${RALPH_LIB_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
 RALPH_STREAM_READER="$RALPH_LIB_DIR/stream-agent.mjs"
 
 resolve_tool_prompt() {
-  local scope="$1"
-
   case "$TOOL" in
-    claude)
-      if [[ "$scope" == "root" ]]; then
-        echo "$ROOT_CLAUDE_PROMPT_FILE"
-      else
-        echo "$CLAUDE_PROMPT_FILE"
-      fi
-      ;;
-    codex)
-      if [[ "$scope" == "root" ]]; then
-        echo "$ROOT_CODEX_PROMPT_FILE"
-      else
-        echo "$CODEX_PROMPT_FILE"
-      fi
-      ;;
-    pi)
-      if [[ "$scope" == "root" ]]; then
-        echo "$ROOT_PI_PROMPT_FILE"
-      else
-        echo "$PI_PROMPT_FILE"
-      fi
-      ;;
+    claude) echo "$CLAUDE_PROMPT_FILE" ;;
+    codex)  echo "$CODEX_PROMPT_FILE" ;;
+    pi)     echo "$PI_PROMPT_FILE" ;;
   esac
 }
 

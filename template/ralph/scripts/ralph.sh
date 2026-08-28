@@ -76,9 +76,12 @@ ROOT_PROGRESS_DIR="$RALPH_ROOT/progress"
 ROOT_SHARED_MEMORY_FILE="$ROOT_PROGRESS_DIR/shared-memory.json"
 ROOT_ARCHIVE_DIR="$RALPH_ROOT/archive"
 ROOT_LAST_BRANCH_FILE="$RALPH_ROOT/.last-branch"
-ROOT_CLAUDE_PROMPT_FILE="$SCRIPT_DIR/CLAUDE.md"
-ROOT_CODEX_PROMPT_FILE="$SCRIPT_DIR/CODEX.md"
-ROOT_PI_PROMPT_FILE="$SCRIPT_DIR/PI.md"
+# Agent playbooks are always read from this checkout's scripts directory. Ralph
+# itself reads them and folds them into a temporary prompt file; the agent never
+# opens them, so there is no reason to keep a second copy inside the worktree.
+CLAUDE_PROMPT_FILE="$SCRIPT_DIR/CLAUDE.md"
+CODEX_PROMPT_FILE="$SCRIPT_DIR/CODEX.md"
+PI_PROMPT_FILE="$SCRIPT_DIR/PI.md"
 MERGE_BACK_PROMPT_FILE="$SCRIPT_DIR/MERGE_BACK.md"
 MERGE_BACK_STATE_FILE="$RALPH_ROOT/.merge-back-done"
 CONSOLIDATE_PROMPT_FILE_TEMPLATE="$SCRIPT_DIR/CONSOLIDATE.md"
@@ -298,11 +301,6 @@ if [ -n "$TARGET_BRANCH" ]; then
 fi
 
 ACTIVE_RALPH_ROOT="$ACTIVE_WORKTREE/ralph"
-ACTIVE_SCRIPT_DIR="$ACTIVE_RALPH_ROOT/scripts"
-CLAUDE_PROMPT_FILE="$ACTIVE_SCRIPT_DIR/CLAUDE.md"
-CODEX_PROMPT_FILE="$ACTIVE_SCRIPT_DIR/CODEX.md"
-PI_PROMPT_FILE="$ACTIVE_SCRIPT_DIR/PI.md"
-ACTIVE_MERGE_BACK_PROMPT_FILE="$ACTIVE_SCRIPT_DIR/MERGE_BACK.md"
 
 if [[ "$RUN_MODE" == "scoped" ]]; then
   ACTIVE_RUN_DIR="$ACTIVE_RALPH_ROOT/runs/$RUN_ID"
@@ -346,27 +344,9 @@ fi
 
 initialize_ralph_story_state
 
-if [[ ! -f "$CLAUDE_PROMPT_FILE" ]]; then
-  CLAUDE_PROMPT_FILE="$ROOT_CLAUDE_PROMPT_FILE"
-fi
-
-if [[ ! -f "$CODEX_PROMPT_FILE" ]]; then
-  CODEX_PROMPT_FILE="$ROOT_CODEX_PROMPT_FILE"
-fi
-
-if [[ ! -f "$PI_PROMPT_FILE" ]]; then
-  PI_PROMPT_FILE="$ROOT_PI_PROMPT_FILE"
-fi
-
-ACTIVE_PROMPT_FILE="$(resolve_tool_prompt active)"
-if [[ ! -f "$ACTIVE_PROMPT_FILE" ]]; then
-  echo "Error: Missing $TOOL prompt file: $ACTIVE_PROMPT_FILE"
-  exit 1
-fi
-
-ROOT_PROMPT_FILE="$(resolve_tool_prompt root)"
-if [[ ! -f "$ROOT_PROMPT_FILE" ]]; then
-  echo "Error: Missing root $TOOL prompt file: $ROOT_PROMPT_FILE"
+TOOL_PROMPT_FILE="$(resolve_tool_prompt)"
+if [[ ! -f "$TOOL_PROMPT_FILE" ]]; then
+  echo "Error: Missing $TOOL prompt file: $TOOL_PROMPT_FILE"
   exit 1
 fi
 
@@ -386,7 +366,7 @@ if [[ ! -f "$FAILURE_DIAGNOSIS_PROMPT_FILE_TEMPLATE" ]]; then
 fi
 
 ACTIVE_CONTEXT_PROMPT_FILE=$(mktemp)
-make_prompt_with_run_context "$ACTIVE_PROMPT_FILE" "$ACTIVE_CONTEXT_PROMPT_FILE"
+make_prompt_with_run_context "$TOOL_PROMPT_FILE" "$ACTIVE_CONTEXT_PROMPT_FILE"
 
 # Archive previous run if branch changed
 if [ -f "$PRD_FILE" ] && [ -f "$LAST_BRANCH_FILE" ]; then
@@ -560,7 +540,7 @@ while true; do
       fi
 
       MERGE_PROMPT_FILE=$(mktemp)
-      make_prompt_with_run_context "$ROOT_PROMPT_FILE" "$MERGE_PROMPT_FILE"
+      make_prompt_with_run_context "$TOOL_PROMPT_FILE" "$MERGE_PROMPT_FILE"
       printf "\n\n" >> "$MERGE_PROMPT_FILE"
       cat "$MERGE_BACK_PROMPT_FILE" >> "$MERGE_PROMPT_FILE"
       printf "\n\n" >> "$MERGE_PROMPT_FILE"
@@ -614,7 +594,7 @@ EOF
       echo "==============================================================="
 
       CONSOLIDATE_PROMPT_FILE=$(mktemp)
-      make_prompt_with_run_context "$ROOT_PROMPT_FILE" "$CONSOLIDATE_PROMPT_FILE"
+      make_prompt_with_run_context "$TOOL_PROMPT_FILE" "$CONSOLIDATE_PROMPT_FILE"
       printf "\n\n" >> "$CONSOLIDATE_PROMPT_FILE"
       cat "$CONSOLIDATE_PROMPT_FILE_TEMPLATE" >> "$CONSOLIDATE_PROMPT_FILE"
       printf "\n\n" >> "$CONSOLIDATE_PROMPT_FILE"

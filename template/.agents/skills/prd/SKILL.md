@@ -156,15 +156,17 @@ Each story should be small enough to implement in one focused session.
 - [ ] Specific verifiable criterion
 - [ ] Another criterion
 - [ ] Typecheck/lint passes
-- [ ] **[UI stories only]** Verify in browser using dev-browser skill
+- [ ] **[UI stories only]** Verified in a browser: [what should be visible or happen on screen]
 ```
 
 **Important:**
 
 - Acceptance criteria must be verifiable, not vague. "Works correctly" is bad. "Button shows confirmation dialog before
   deleting" is good.
-- **For any story with UI changes:** Always include "Verify in browser using dev-browser skill" as acceptance criteria.
-  This ensures visual verification of frontend work.
+- **For any story with UI changes:** Always include a "Verified in a browser: ..." criterion naming the observable
+  result. This ensures visual verification of frontend work. Never name a tool or skill in a criterion — the round that
+  implements the story uses whatever browser tooling it has, and a criterion pointing at a missing helper can never be
+  satisfied.
 
 ### 4. Functional Requirements
 
@@ -259,7 +261,7 @@ Add priority levels to tasks so users can focus on what matters most. Tasks can 
 - [ ] Each task card shows colored priority badge (red=high, yellow=medium, gray=low)
 - [ ] Priority visible without hovering or clicking
 - [ ] Typecheck passes
-- [ ] Verify in browser using dev-browser skill
+- [ ] Verified in a browser: each card's badge color matches that task's priority
 
 ### US-003: Add priority selector to task edit
 **Description:** As a user, I want to change a task's priority when editing it.
@@ -269,7 +271,7 @@ Add priority levels to tasks so users can focus on what matters most. Tasks can 
 - [ ] Shows current priority as selected
 - [ ] Saves immediately on selection change
 - [ ] Typecheck passes
-- [ ] Verify in browser using dev-browser skill
+- [ ] Verified in a browser: changing the dropdown updates the card's badge without a reload
 
 ### US-004: Filter tasks by priority
 **Description:** As a user, I want to filter the task list to see only high-priority items when I'm focused.
@@ -279,7 +281,7 @@ Add priority levels to tasks so users can focus on what matters most. Tasks can 
 - [ ] Filter persists in URL params
 - [ ] Empty state message when no tasks match filter
 - [ ] Typecheck passes
-- [ ] Verify in browser using dev-browser skill
+- [ ] Verified in a browser: picking a filter narrows the list and updates the URL
 
 ## Functional Requirements
 

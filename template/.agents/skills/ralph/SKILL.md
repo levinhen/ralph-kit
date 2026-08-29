@@ -200,6 +200,7 @@ Each criterion must be something Ralph can CHECK, not something vague.
 - "User can do X easily"
 - "Good UX"
 - "Handles edge cases"
+- "Verify with the <name> skill" — names a tool instead of an outcome, and is unsatisfiable wherever that tool is absent
 
 ### Always include as final criterion:
 
@@ -216,11 +217,17 @@ For stories with testable logic, also include:
 ### For stories that change UI, also include:
 
 ```
-"Verify in browser using dev-browser skill"
+"Verified in a browser: <what should be visible or happen on screen>"
 ```
 
-Frontend stories are NOT complete until visually verified. Ralph will use the dev-browser skill to navigate to the page,
-interact with the UI, and confirm changes work.
+Name the observable result, never the tool that checks it. The implementing round uses whatever browser tooling it
+actually has — a built-in browser/preview tool, a browser MCP server, a Playwright script the project already depends
+on, or a browser skill installed in the repo. A criterion that names one specific helper is unsatisfiable in every
+round that lacks it, which either stalls the story or gets it marked passing dishonestly.
+
+Frontend stories are NOT complete until that observation is made. If a round has no way to drive a browser at all, it
+records `browser verification: unavailable - <reason>` in its progress checks so a human can pick it up; it must never
+claim a verification it did not perform.
 
 ---
 
@@ -319,7 +326,7 @@ Add ability to mark tasks with different statuses.
         "Each task card shows colored status badge",
         "Badge colors: gray=pending, blue=in_progress, green=done",
         "Typecheck passes",
-        "Verify in browser using dev-browser skill"
+        "Verified in a browser: each card's badge color matches that task's status"
       ],
       "priority": 2,
       "passes": false,
@@ -334,7 +341,7 @@ Add ability to mark tasks with different statuses.
         "Changing status saves immediately",
         "UI updates without page refresh",
         "Typecheck passes",
-        "Verify in browser using dev-browser skill"
+        "Verified in a browser: changing a row's status updates the row without a reload"
       ],
       "priority": 3,
       "passes": false,
@@ -348,7 +355,7 @@ Add ability to mark tasks with different statuses.
         "Filter dropdown: All | Pending | In Progress | Done",
         "Filter persists in URL params",
         "Typecheck passes",
-        "Verify in browser using dev-browser skill"
+        "Verified in a browser: picking a filter narrows the list and updates the URL"
       ],
       "priority": 4,
       "passes": false,
@@ -401,6 +408,6 @@ Before writing run-scoped `prd.json`, verify:
 - [ ] Each story is completable in one iteration (small enough)
 - [ ] Stories are ordered by dependency (schema to backend to UI)
 - [ ] Every story has "Typecheck passes" as criterion
-- [ ] UI stories have "Verify in browser using dev-browser skill" as criterion
+- [ ] UI stories have a "Verified in a browser: ..." criterion naming what to look at, with no tool or skill name in it
 - [ ] Acceptance criteria are verifiable (not vague)
 - [ ] No story depends on a later story

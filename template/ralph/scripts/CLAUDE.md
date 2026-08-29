@@ -114,15 +114,24 @@ If `setsid` is unavailable, use `nohup <cmd> > /tmp/ralph-server.log 2>&1 < /dev
 
 NEVER leave a `npm run dev`, `vite`, `next dev`, watcher, or local server running when you finish. Ralph runs a safety-net cleanup after each invocation — on Windows it terminates the tool's whole process tree and sweeps any process whose command line points into the worktree — but that is a backstop, not a substitute for stopping your own processes.
 
-## Browser Testing (If Available)
+## Browser Verification
 
-For any story that changes UI, verify it works in the browser if you have browser testing tools configured (e.g., via MCP):
+A UI story usually carries a `Verified in a browser: ...` criterion naming what should be visible or happen on screen.
+To satisfy it:
 
-1. Navigate to the relevant page
-2. Verify the UI changes work as expected
-3. Take a screenshot if helpful for the progress log
+1. Start the dev server as a background process (see above) and open the page the criterion is about.
+2. Observe exactly what the criterion names, driving the interaction it describes.
+3. Record what you saw in the progress report's `checks` (plus a screenshot path if your tooling produces one).
 
-If no browser tools are available, note in your progress report that manual browser verification is needed.
+Use whatever browser tooling this round actually has: a built-in browser or preview tool, a browser MCP server, a
+Playwright/Puppeteer script the project already depends on, or a browser skill installed in this repo. Check what is
+available before relying on it — never treat a specific skill or tool name as guaranteed, and never fail a round
+because a named helper turns out to be missing.
+
+If nothing here can drive a browser, fall back to the closest automated check the project supports (component test,
+e2e test, an assertion on the rendered HTML), then record `browser verification: unavailable - <reason>` in `checks`.
+That alone does not block `passes: true` when every other criterion is met, but "unavailable" means you looked and
+found no way — not that it was inconvenient. Never claim a visual verification you did not perform.
 
 ## Stop Condition
 

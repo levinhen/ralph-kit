@@ -33,6 +33,14 @@ npm test
   round should behave usually belongs in all three; decide deliberately when it
   does not. CODEX.md and PI.md drive the same model family, so they diverge
   least.
+- **Acceptance criteria never name a tool.** `/prd` and `/ralph` write criteria
+  into `prd.json`, and an implementation round can only satisfy them with the
+  tooling it happens to have. Write the observable outcome
+  (`Verified in a browser: <what shows on screen>`), never the helper that
+  observes it: a criterion naming a skill or MCP server the round lacks is
+  unsatisfiable, so the story either stalls or gets marked passing dishonestly.
+  The three playbooks' `Browser Verification` section is what tells a round how
+  to pick its own tooling and how to record the gap when it has none.
 - **Agent playbooks are read from the root checkout only.** `ralph.sh` resolves
   them from `SCRIPT_DIR` and folds them into a temporary prompt file, so a new
   prompt file needs no worktree copy and no entry in `sync_root_ralph_inputs`.

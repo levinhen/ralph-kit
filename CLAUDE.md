@@ -86,6 +86,19 @@ npm test
   agent or deletes the stale file. Keep the skill's `deps-audit.json` schema and
   the lint's checks in sync — the skill is the only place an agent learns the
   shape the lint compares against.
+- **Status-line colour lives in `lib/log.sh`, and never in a log file.** The
+  loop's own status lines print through `ralph_log_line` / `ralph_log_banner`
+  (stdout) and `ralph_log_line_err` (stderr), which emit SGR codes only when
+  that stream is an interactive terminal and `NO_COLOR` is unset. Never write an
+  escape sequence into an `echo` directly: `orchestrate.sh` redirects each
+  parallel run to a log file and the tests capture stdout, and both must keep
+  reading as plain text. The hues are semantic, not decorative — cyan story
+  round, yellow unblock round, magenta merge-back, blue consolidation, green
+  finished, red stopping — and the unblock yellow is deliberately the same
+  warning colour `lib/progress-bar.sh` paints the pinned row with for that
+  phase. Changing one without the other makes the row and the banner disagree
+  about whether the run is on the happy path. Both READMEs document the table.
+
 - **The failure path is described in four places.** Story failure runs exactly
   one round (`UNBLOCK_STORY.md`), which decides whether the story is genuinely
   blocked or was merely unfinished: unfinished means it gets completed there,

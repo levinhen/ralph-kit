@@ -177,7 +177,7 @@ require_tool_command() {
     return 0
   fi
 
-  echo "Error: Could not find executable for Ralph tool '$tool_name'." >&2
+  ralph_log_line_err error "Error: Could not find executable for Ralph tool '$tool_name'."
   echo "Looked for: $*" >&2
   echo "PATH: $PATH" >&2
   return 127
@@ -258,7 +258,7 @@ wait_for_active_tool() {
 
     if [[ "$timeout_seconds" -gt 0 && $((now - start_time)) -ge "$timeout_seconds" ]]; then
       echo "" >&2
-      echo "Ralph tool invocation exceeded RALPH_TOOL_TIMEOUT_SECONDS=$timeout_seconds; stopping it." >&2
+      ralph_log_line_err warn "Ralph tool invocation exceeded RALPH_TOOL_TIMEOUT_SECONDS=$timeout_seconds; stopping it."
       terminate_active_tool
       wait "$ACTIVE_TOOL_PID" 2>/dev/null || true
       return "${RALPH_TOOL_TIMEOUT_EXIT_CODE:-124}"
@@ -266,7 +266,7 @@ wait_for_active_tool() {
 
     if [[ "$idle_timeout_seconds" -gt 0 && $((now - last_activity_time)) -ge "$idle_timeout_seconds" ]]; then
       echo "" >&2
-      echo "Ralph tool invocation produced no output for RALPH_TOOL_IDLE_TIMEOUT_SECONDS=$idle_timeout_seconds; stopping it." >&2
+      ralph_log_line_err warn "Ralph tool invocation produced no output for RALPH_TOOL_IDLE_TIMEOUT_SECONDS=$idle_timeout_seconds; stopping it."
       terminate_active_tool
       wait "$ACTIVE_TOOL_PID" 2>/dev/null || true
       return "${RALPH_TOOL_TIMEOUT_EXIT_CODE:-124}"

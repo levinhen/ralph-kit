@@ -157,7 +157,7 @@ run_selected_tool() {
     # Fold this invocation into the run ledger before the scratch dir goes away.
     ralph_usage_record "$summary_file" || true
   else
-    echo "Warning: the $TOOL stream reader wrote no summary; treating this invocation as failed." >&2
+    ralph_log_line_err warn "Warning: the $TOOL stream reader wrote no summary; treating this invocation as failed."
     if [[ "$tool_exit_code" -eq 0 ]]; then
       tool_exit_code=1
     fi
@@ -174,7 +174,7 @@ run_selected_tool() {
 
   if [[ "$tool_exit_code" -ne 0 && -f "$diagnostic_file" ]]; then
     LAST_TOOL_DIAGNOSTIC_FILE="$diagnostic_file"
-    echo "$TOOL failed; up to 100 recent raw events were saved for diagnosis: $diagnostic_file" >&2
+    ralph_log_line_err warn "$TOOL failed; up to 100 recent raw events were saved for diagnosis: $diagnostic_file"
   else
     rm -f "$diagnostic_file"
   fi
@@ -188,15 +188,15 @@ run_selected_tool() {
 
   if [[ "$tool_exit_code" -eq "${RALPH_TOOL_TIMEOUT_EXIT_CODE:-124}" ]]; then
     echo ""
-    echo "Ralph stopped $TOOL because the tool invocation timed out or went idle."
-    echo "Adjust RALPH_TOOL_TIMEOUT_SECONDS or RALPH_TOOL_IDLE_TIMEOUT_SECONDS if this was expected."
+    ralph_log_line error "Ralph stopped $TOOL because the tool invocation timed out or went idle."
+    ralph_log_line error "Adjust RALPH_TOOL_TIMEOUT_SECONDS or RALPH_TOOL_IDLE_TIMEOUT_SECONDS if this was expected."
     return "${RALPH_TOOL_TIMEOUT_EXIT_CODE:-124}"
   fi
 
   if [[ "$tool_exit_code" -ne 0 ]] \
     && { [[ "$stream_rate_limited" == "true" ]] || ralph_detected_rate_limit "$LAST_MESSAGE"; }; then
     echo ""
-    echo "Ralph detected a 429/rate-limit response from $TOOL. Skipping remaining Ralph iterations."
+    ralph_log_line error "Ralph detected a 429/rate-limit response from $TOOL. Skipping remaining Ralph iterations."
     notify_ralph_rate_limited
     exit "$RALPH_RATE_LIMIT_EXIT_CODE"
   fi
@@ -206,14 +206,14 @@ run_selected_tool() {
   # A clean exit code is not proof of a real turn: both CLIs can exit 0 after
   # their stream was cut short, which used to be indistinguishable from success.
   if [[ "$tool_exit_code" -ne 0 ]]; then
-    echo "Warning: $TOOL exited with code $tool_exit_code." >&2
+    ralph_log_line_err warn "Warning: $TOOL exited with code $tool_exit_code."
   elif [[ "$LAST_TOOL_SAW_COMPLETION" != "true" ]]; then
-    echo "Warning: $TOOL exited cleanly but never reported a completed turn; counting this iteration as failed." >&2
+    ralph_log_line_err warn "Warning: $TOOL exited cleanly but never reported a completed turn; counting this iteration as failed."
     LAST_TOOL_EXIT_CODE=1
   elif [[ -z "$LAST_MESSAGE" ]]; then
     # Weak on its own: a turn can legitimately end on tool calls with no closing
     # message, so this stays a warning instead of a failure.
-    echo "Warning: $TOOL completed its turn but produced no final message." >&2
+    ralph_log_line_err warn "Warning: $TOOL completed its turn but produced no final message."
   fi
 
   record_tool_outcome
@@ -236,19 +236,19 @@ record_tool_outcome() {
   CONSECUTIVE_TOOL_FAILURES=$((${CONSECUTIVE_TOOL_FAILURES:-0} + 1))
 
   if [[ "${DEFER_TOOL_FAILURE_STOP:-false}" == "true" ]]; then
-    echo "Ralph tool failure $CONSECUTIVE_TOOL_FAILURES/$limit; deferring failure handling to the current story controller." >&2
+    ralph_log_line_err warn "Ralph tool failure $CONSECUTIVE_TOOL_FAILURES/$limit; deferring failure handling to the current story controller."
     return 0
   fi
 
   if [[ "$limit" -gt 0 && "$CONSECUTIVE_TOOL_FAILURES" -ge "$limit" ]]; then
     echo ""
-    echo "Ralph stopping: $TOOL failed $CONSECUTIVE_TOOL_FAILURES times in a row."
-    echo "Set RALPH_MAX_CONSECUTIVE_FAILURES=0 to keep going through failures."
+    ralph_log_line error "Ralph stopping: $TOOL failed $CONSECUTIVE_TOOL_FAILURES times in a row."
+    ralph_log_line error "Set RALPH_MAX_CONSECUTIVE_FAILURES=0 to keep going through failures."
     notify_ralph_needs_attention
     exit 1
   fi
 
-  echo "Ralph tool failure $CONSECUTIVE_TOOL_FAILURES/$limit; continuing." >&2
+  ralph_log_line_err warn "Ralph tool failure $CONSECUTIVE_TOOL_FAILURES/$limit; continuing."
   return 0
 }
 

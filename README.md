@@ -161,6 +161,24 @@ Two of the segments only appear when they have something to say:
 
 A background ticker redraws it every `RALPH_PROGRESS_TICK_SECONDS` (default 2) so the clocks keep moving while an agent is silent, and it restores the terminal on its own if Ralph is killed outright. It disables itself when output is redirected (including parallel orchestrator logs) — control codes only ever go to `/dev/tty`, never into a log; set `RALPH_PROGRESS=0` to turn it off explicitly.
 
+### Colour in the log
+
+A round prints thousands of lines of agent output, so the handful of lines that say where the loop actually is are colour-coded. One hue always means the same thing:
+
+| Colour | What it marks |
+|---|---|
+| cyan | a story round starting — `Ralph Round 7 (codex) - Target: US-004` |
+| yellow (bold) | the story unblock round, and everything it decides |
+| magenta | the merge-back round |
+| blue | the consolidation round |
+| green | a story, a merge, or the whole run finished |
+| yellow | a warning the loop continues past |
+| red | Ralph is stopping |
+
+The unblock round deliberately shares the pinned row's warning yellow: both mean the run has left the happy path. Agent output itself is never recoloured, and neither is the unblock round's own closing report — only the frame around it.
+
+Colour is decided per stream and only ever reaches an interactive terminal, so redirected output (parallel orchestrator logs, CI, `tee`) stays byte-identical plain text. `NO_COLOR` disables it, `RALPH_LOG_COLOR=0` forces it off, and `RALPH_LOG_COLOR=1` forces it on — useful when piping into `less -R`.
+
 ### Token and cost accounting
 
 Ralph normalises the usage each agent CLI reports and sums it across the run. Both the running total in the status row and the closing bill on stdout come from the same ledger, so it is also there for non-interactive runs where the pinned row is off:
@@ -241,6 +259,7 @@ With no `--plan`, the orchestrator reads `dependsOnRuns` across the incomplete r
 | `RALPH_SHARED_MEMORY_ITEMS` / `RALPH_STORY_PROGRESS_RECORDS` | `40` / `5` | prompt memory slice sizes |
 | `RALPH_PROGRESS` | `1` | pinned story progress in interactive terminals; set to `0` to disable |
 | `RALPH_PROGRESS_IDLE_MIN` | `30` | seconds of agent silence before the idle clock appears |
+| `RALPH_LOG_COLOR` | `auto` | colour on the loop's own status lines; `0` forces plain text, `1` forces colour even when redirected (`NO_COLOR` also disables it) |
 | `RALPH_MAX_FINALIZE_ROUNDS` / `RALPH_MAX_MERGE_BACK_ROUNDS` / `RALPH_MAX_CONSOLIDATION_ROUNDS` | `3` each | how often a wrap-up round may retry itself before Ralph stops |
 | `RALPH_PRICE_INPUT_USD` / `RALPH_PRICE_CACHED_INPUT_USD` | `5` / `0.5` | USD per 1M tokens, used to estimate codex cost (claude and pi report their own) |
 | `RALPH_PRICE_CACHE_WRITE_USD` / `RALPH_PRICE_OUTPUT_USD` | `6.25` / `30` | USD per 1M tokens, used to estimate codex cost (claude and pi report their own) |

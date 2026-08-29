@@ -159,6 +159,24 @@ Ralph:20260817-a [█████░░░░░░░░░░░] 3/8 done | U
 
 后台心跳每 `RALPH_PROGRESS_TICK_SECONDS` 秒（默认 2）重绘一次，因此 agent 静默时计时仍在走；Ralph 被强杀时它也会自行恢复终端。输出被重定向到文件（包括并行编排日志）时会自动关闭——控制码只写 `/dev/tty`，绝不会进日志；设置 `RALPH_PROGRESS=0` 也可手动关闭。
 
+### 日志配色
+
+一轮会刷出成千上万行 agent 输出，因此真正说明「循环走到哪一步」的那几行是带颜色的。同一种颜色始终表示同一件事：
+
+| 颜色 | 含义 |
+|---|---|
+| 青色 | 一个故事轮开始——`Ralph Round 7 (codex) - Target: US-004` |
+| 黄色（加粗） | 故事修复轮（unblock round）及它做出的判定 |
+| 品红 | merge-back 轮 |
+| 蓝色 | consolidation 轮 |
+| 绿色 | 一个故事、一次合并或整个 run 完成 |
+| 黄色 | 循环会继续跑下去的告警 |
+| 红色 | Ralph 即将停止 |
+
+修复轮特意沿用进度栏的告警黄：两者都表示这次运行已经偏离正常路径。agent 自身的输出不会被重新上色，修复轮的收尾报告正文也不会——只有包住它的框线会。
+
+颜色按输出流各自判定，且只写向交互式终端，因此被重定向的输出（并行编排日志、CI、`tee`）仍是逐字节一致的纯文本。`NO_COLOR` 会关闭它，`RALPH_LOG_COLOR=0` 强制关闭，`RALPH_LOG_COLOR=1` 强制开启——管进 `less -R` 时会用到。
+
 ### Token 与成本统计
 
 Ralph 会把两个 agent CLI 各自上报的用量归一化，并在整个 run 内累加。进度栏里的实时总计和结束时打印在 stdout 上的账单出自同一份账本，所以进度栏关闭的非交互运行同样能拿到：
@@ -239,6 +257,7 @@ ralph/scripts/orchestrate.sh --tool claude --plan "1 > 2,3 > 4"   # 手工阶段
 | `RALPH_SHARED_MEMORY_ITEMS` / `RALPH_STORY_PROGRESS_RECORDS` | `40` / `5` | prompt 记忆切片大小 |
 | `RALPH_PROGRESS` | `1` | 交互式终端底部的常驻故事进度栏；设为 `0` 关闭 |
 | `RALPH_PROGRESS_IDLE_MIN` | `30` | agent 静默多少秒后显示空闲计时 |
+| `RALPH_LOG_COLOR` | `auto` | 循环自身状态行的配色；`0` 强制纯文本，`1` 即使被重定向也强制上色（`NO_COLOR` 同样可关闭）|
 | `RALPH_MAX_FINALIZE_ROUNDS` / `RALPH_MAX_MERGE_BACK_ROUNDS` / `RALPH_MAX_CONSOLIDATION_ROUNDS` | 各 `3` | 单个收尾轮最多自我重试几次，超出就停下 |
 | `RALPH_PRICE_INPUT_USD` / `RALPH_PRICE_CACHED_INPUT_USD` | `5` / `0.5` | 每百万 token 美元单价，用于估算 codex 成本（claude 与 pi 自报金额）|
 | `RALPH_PRICE_CACHE_WRITE_USD` / `RALPH_PRICE_OUTPUT_USD` | `6.25` / `30` | 每百万 token 美元单价，用于估算 codex 成本（claude 与 pi 自报金额）|

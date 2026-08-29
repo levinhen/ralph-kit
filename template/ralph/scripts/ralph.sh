@@ -107,6 +107,7 @@ ACTIVE_WORKTREE=""
 
 LIB_DIR="$SCRIPT_DIR/lib"
 
+source "$LIB_DIR/log.sh"
 source "$LIB_DIR/process.sh"
 source "$LIB_DIR/run-deps.sh"
 source "$LIB_DIR/runs.sh"
@@ -197,7 +198,7 @@ cleanup_on_signal() {
   fi
 
   echo "" >&2
-  echo "Ralph received $signal_name; stopping active tool and cleaning up." >&2
+  ralph_log_line_err warn "Ralph received $signal_name; stopping active tool and cleaning up."
   exit "$exit_code"
 }
 
@@ -536,8 +537,8 @@ wrap_up_budget_exhausted() {
 
   ralph_progress_stop || true
   echo ""
-  echo "Ralph ran the $phase round $limit times without it completing."
-  echo "Check $PROGRESS_FILE and the output above before rerunning."
+  ralph_log_line error "Ralph ran the $phase round $limit times without it completing."
+  ralph_log_line error "Check $PROGRESS_FILE and the output above before rerunning."
   notify_ralph_needs_attention "$phase did not complete after $limit rounds"
   exit 1
 }
@@ -572,9 +573,7 @@ while true; do
     if merge_back_needed && ! merge_back_done; then
       ralph_progress_update "merge-back" "" "$ROUND"
       echo ""
-      echo "==============================================================="
-      echo "  Ralph Merge-Back Round ($TOOL) - $TARGET_BRANCH -> $BASE_BRANCH"
-      echo "==============================================================="
+      ralph_log_banner merge "Ralph Merge-Back Round ($TOOL) - $TARGET_BRANCH -> $BASE_BRANCH"
 
       if ! target_worktree_clean_for_merge; then
         FINALIZE_ROUNDS=$((FINALIZE_ROUNDS + 1))
@@ -583,7 +582,7 @@ while true; do
         fi
         ralph_progress_update "finalizing" "" "$ROUND"
         if run_target_worktree_finalization; then
-          echo "Ralph target worktree is clean. The next round will start merge-back."
+          ralph_log_line success "Ralph target worktree is clean. The next round will start merge-back."
         fi
         sleep 2
         continue
@@ -596,7 +595,7 @@ while true; do
 
       if run_git_merge_back; then
         echo ""
-        echo "Ralph merged $TARGET_BRANCH into $BASE_BRANCH. Consolidation round next."
+        ralph_log_line success "Ralph merged $TARGET_BRANCH into $BASE_BRANCH. Consolidation round next."
         sleep 2
         continue
       fi
@@ -632,15 +631,15 @@ EOF
 
       if merge_back_done; then
         echo ""
-        echo "Ralph merged $TARGET_BRANCH into $BASE_BRANCH. Consolidation round next."
+        ralph_log_line success "Ralph merged $TARGET_BRANCH into $BASE_BRANCH. Consolidation round next."
         sleep 2
         continue
       fi
 
       if [[ "$TOOL" == "codex" && "$LAST_MESSAGE" == *"<promise>COMPLETE</promise>"* ]]; then
-        echo "Warning: Codex reported COMPLETE, but merge-back marker was not written. Continuing."
+        ralph_log_line warn "Warning: Codex reported COMPLETE, but merge-back marker was not written. Continuing."
       elif echo "$OUTPUT" | grep -q "<promise>COMPLETE</promise>"; then
-        echo "Warning: Tool reported COMPLETE, but merge-back marker was not written. Continuing."
+        ralph_log_line warn "Warning: Tool reported COMPLETE, but merge-back marker was not written. Continuing."
       fi
 
       echo "Merge-back round complete. Continuing..."
@@ -656,9 +655,7 @@ EOF
 
       ralph_progress_update "consolidating" "" "$ROUND"
       echo ""
-      echo "==============================================================="
-      echo "  Ralph Consolidation Round ($TOOL) - $RUN_ID -> design-ledger"
-      echo "==============================================================="
+      ralph_log_banner consolidate "Ralph Consolidation Round ($TOOL) - $RUN_ID -> design-ledger"
 
       CONSOLIDATE_PROMPT_FILE=$(mktemp)
       make_prompt_with_run_context "$TOOL_PROMPT_FILE" "$CONSOLIDATE_PROMPT_FILE"
@@ -691,18 +688,18 @@ EOF
         archive_consolidated_run
         echo ""
         if merge_back_needed; then
-          echo "Ralph completed merge-back + consolidation for run $RUN_ID."
+          ralph_log_line success "Ralph completed merge-back + consolidation for run $RUN_ID."
         else
-          echo "Ralph completed consolidation for run $RUN_ID."
+          ralph_log_line success "Ralph completed consolidation for run $RUN_ID."
         fi
         notify_ralph_merged
         exit 0
       fi
 
       if [[ "$TOOL" == "codex" && "$LAST_MESSAGE" == *"<promise>COMPLETE</promise>"* ]]; then
-        echo "Warning: Codex reported COMPLETE, but consolidation marker was not written. Continuing."
+        ralph_log_line warn "Warning: Codex reported COMPLETE, but consolidation marker was not written. Continuing."
       elif echo "$OUTPUT" | grep -q "<promise>COMPLETE</promise>"; then
-        echo "Warning: Tool reported COMPLETE, but consolidation marker was not written. Continuing."
+        ralph_log_line warn "Warning: Tool reported COMPLETE, but consolidation marker was not written. Continuing."
       fi
 
       echo "Consolidation round complete (marker not yet written). Continuing..."
@@ -716,20 +713,18 @@ EOF
 
     ralph_progress_update "complete" "" "$ROUND"
     echo ""
-    echo "Ralph completed all tasks!"
-    echo "All stories in $PRD_FILE already have passes=true"
+    ralph_log_line success "Ralph completed all tasks!"
+    ralph_log_line success "All stories in $PRD_FILE already have passes=true"
     notify_ralph_stories_completed
     exit 0
   fi
 
   echo ""
-  echo "==============================================================="
-  echo "  Ralph Round $ROUND ($TOOL) - Target: $CURRENT_STORY_ID"
-  echo "==============================================================="
+  ralph_log_banner story "Ralph Round $ROUND ($TOOL) - Target: $CURRENT_STORY_ID"
 
   CURRENT_STORY_FILE="$(story_file_path "$CURRENT_STORY_ID")"
   if [[ ! -f "$CURRENT_STORY_FILE" ]]; then
-    echo "Error: Missing current story file: $CURRENT_STORY_FILE"
+    ralph_log_line error "Error: Missing current story file: $CURRENT_STORY_FILE"
     exit 1
   fi
 
@@ -774,7 +769,7 @@ EOF
   ' "$PRD_FILE" 2>/dev/null || echo "false")
 
   if [[ "$STORY_PASSED" != "true" ]]; then
-    echo "Warning: $CURRENT_STORY_ID is still not marked passes=true in $PRD_FILE"
+    ralph_log_line warn "Warning: $CURRENT_STORY_ID is still not marked passes=true in $PRD_FILE"
 
     # The unblock round may rewrite the backlog rather than the code, so capture
     # what the split looks like now. passes/notes are excluded: those move on
@@ -783,10 +778,8 @@ EOF
 
     ralph_progress_update "unblocking" "$CURRENT_STORY_ID" "$ROUND"
     echo ""
-    echo "==============================================================="
-    echo "  Ralph Story Unblock Round ($TOOL) - Target: $CURRENT_STORY_ID"
-    echo "==============================================================="
-    echo "The failed story is not retried blindly. One round decides whether it is genuinely blocked, then finishes it or restructures the backlog around it."
+    ralph_log_banner unblock "Ralph Story Unblock Round ($TOOL) - Target: $CURRENT_STORY_ID"
+    ralph_log_line unblock "The failed story is not retried blindly. One round decides whether it is genuinely blocked, then finishes it or restructures the backlog around it."
 
     UNBLOCK_PROMPT_FILE=$(mktemp)
     make_story_unblock_prompt \
@@ -828,7 +821,7 @@ EOF
 
     if [[ "$STORY_PASSED" == "true" ]]; then
       echo ""
-      echo "Ralph finished $CURRENT_STORY_ID in the unblock round: it was unfinished, not blocked."
+      ralph_log_line success "Ralph finished $CURRENT_STORY_ID in the unblock round: it was unfinished, not blocked."
       # Hand back to the top of the loop rather than deciding anything here: the
       # next iteration re-derives the backlog and takes the all-complete,
       # merge-back and consolidation paths on its own.
@@ -843,21 +836,21 @@ EOF
     if [[ "$(prd_structure_fingerprint)" != "$PRE_UNBLOCK_STRUCTURE" ]]; then
       RESTRUCTURES=$((RESTRUCTURES + 1))
       echo ""
-      echo "The unblock round judged $CURRENT_STORY_ID blocked and restructured the backlog in $PRD_REL_PATH."
-      echo "Stories now: $(jq -r '[.userStories[].id] | join(", ")' "$PRD_FILE" 2>/dev/null || echo "unreadable")"
+      ralph_log_line unblock "The unblock round judged $CURRENT_STORY_ID blocked and restructured the backlog in $PRD_REL_PATH."
+      ralph_log_line unblock "Stories now: $(jq -r '[.userStories[].id] | join(", ")' "$PRD_FILE" 2>/dev/null || echo "unreadable")"
       if [[ "$RESTRUCTURES" -le "$MAX_RESTRUCTURES" ]]; then
-        echo "Restructure $RESTRUCTURES of $MAX_RESTRUCTURES for this run. Continuing on the new split..."
+        ralph_log_line unblock "Restructure $RESTRUCTURES of $MAX_RESTRUCTURES for this run. Continuing on the new split..."
         sleep 2
         continue
       fi
 
       ralph_progress_stop || true
       echo ""
-      echo "================= Ralph Story Unblock Round ================="
+      ralph_log_line unblock "================= Ralph Story Unblock Round ================="
       printf '%s\n' "$UNBLOCK_MESSAGE"
-      echo "============================================================="
-      echo "Ralph restructured the backlog $RESTRUCTURES times in this run (limit $MAX_RESTRUCTURES) and stories are still failing."
-      echo "A split that keeps needing repair is a PRD problem. Review $PRD_REL_PATH and the reports above before rerunning."
+      ralph_log_line unblock "============================================================="
+      ralph_log_line error "Ralph restructured the backlog $RESTRUCTURES times in this run (limit $MAX_RESTRUCTURES) and stories are still failing."
+      ralph_log_line error "A split that keeps needing repair is a PRD problem. Review $PRD_REL_PATH and the reports above before rerunning."
       notify_ralph_needs_attention "backlog restructured $RESTRUCTURES times without the run progressing"
       exit 1
     fi
@@ -866,7 +859,7 @@ EOF
     # remains readable at the user's shell prompt.
     ralph_progress_stop || true
     echo ""
-    echo "================= Ralph Story Unblock Round ================="
+    ralph_log_line unblock "================= Ralph Story Unblock Round ================="
     if [[ -n "$UNBLOCK_MESSAGE" ]]; then
       printf '%s\n' "$UNBLOCK_MESSAGE"
     else
@@ -880,27 +873,27 @@ EOF
     if [[ -n "$FAILED_ROUND_DIAGNOSTIC_FILE" ]]; then
       echo "The failed implementation round's raw events are available at: $FAILED_ROUND_DIAGNOSTIC_FILE"
     fi
-    echo "============================================================="
-    echo "Ralph stopped: the unblock round neither finished $CURRENT_STORY_ID nor restructured the backlog around it. Review the report above before rerunning."
+    ralph_log_line unblock "============================================================="
+    ralph_log_line error "Ralph stopped: the unblock round neither finished $CURRENT_STORY_ID nor restructured the backlog around it. Review the report above before rerunning."
     notify_ralph_needs_attention "story $CURRENT_STORY_ID still failing after the unblock round"
     exit 1
   fi
 
   if [[ "$ALL_COMPLETE" == "true" ]] && merge_back_needed; then
-    echo "All stories are marked complete in $PRD_FILE. The next round will run the dedicated merge-back round."
+    ralph_log_line success "All stories are marked complete in $PRD_FILE. The next round will run the dedicated merge-back round."
   elif [[ "$ALL_COMPLETE" == "true" ]]; then
     ralph_progress_update "complete" "" "$ROUND"
     echo ""
-    echo "Ralph completed all tasks!"
-    echo "Completed at round $ROUND"
+    ralph_log_line success "Ralph completed all tasks!"
+    ralph_log_line success "Completed at round $ROUND"
     notify_ralph_stories_completed
     exit 0
   fi
 
   if [[ "$TOOL" == "codex" && "$LAST_MESSAGE" == *"<promise>COMPLETE</promise>"* ]]; then
-    echo "Warning: Codex reported COMPLETE, but Ralph still has remaining work. Continuing."
+    ralph_log_line warn "Warning: Codex reported COMPLETE, but Ralph still has remaining work. Continuing."
   elif echo "$OUTPUT" | grep -q "<promise>COMPLETE</promise>"; then
-    echo "Warning: Tool reported COMPLETE, but Ralph still has remaining work. Continuing."
+    ralph_log_line warn "Warning: Tool reported COMPLETE, but Ralph still has remaining work. Continuing."
   fi
 
   echo "Round $ROUND complete. Continuing..."

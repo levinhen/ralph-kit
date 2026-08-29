@@ -45,6 +45,18 @@ npm test
   them from `SCRIPT_DIR` and folds them into a temporary prompt file, so a new
   prompt file needs no worktree copy and no entry in `sync_root_ralph_inputs`.
   Copying them into the worktree is what used to go stale — do not add it back.
+- **The dependency fields have five consumers.** `dependsOn` (story-level) and
+  `dependsOnRuns` (run-level) are documented in the ralph skill, enforced by
+  `lint-prd.sh`, gated at `ralph.sh` startup, scheduled from by
+  `orchestrate.sh` graph mode, and described in both READMEs. A semantic change
+  to either field must visit all five, or the lint will accept what the
+  scheduler misreads (or vice versa).
+- **The failure path is described in four places.** Story failure runs
+  diagnosis (`DIAGNOSE_FAILURE.md`, read-only) then one escalated recovery
+  round (`RECOVER_STORY.md`, fed the diagnosis report), then stops. The three
+  playbooks' `Stop Condition` sections and both READMEs state this sequence;
+  changing the flow in `ralph.sh` without updating those texts leaves agents
+  being promised a flow that no longer runs.
 
 ## Testing reality
 

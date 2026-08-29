@@ -163,6 +163,10 @@ Each story should be small enough to implement in one focused session.
 
 - Acceptance criteria must be verifiable, not vague. "Works correctly" is bad. "Button shows confirmation dialog before
   deleting" is good.
+- **Every criterion must be observable within the story's own implementation session.** A criterion that can only be
+  checked after a *later* story lands (e.g. a schema story whose criterion describes UI behavior) belongs to that later
+  story instead — give each story an outcome it can demonstrate by itself. If verifying a story needs infrastructure (a
+  test runner, seed data, a dev server), a story that provides it must come earlier in the list.
 - **For any story with UI changes:** Always include a "Verified in a browser: ..." criterion naming the observable
   result. This ensures visual verification of frontend work. Never name a tool or skill in a criterion — the round that
   implements the story uses whatever browser tooling it has, and a criterion pointing at a missing helper can never be
@@ -327,6 +331,7 @@ Before saving the PRD:
 - [ ] Incorporated user's answers
 - [ ] Captured any leftover uncertainties in Open Questions
 - [ ] User stories are small and specific
+- [ ] Each story's acceptance criteria are observable within that story itself, not deferred to a later story
 - [ ] Functional requirements are numbered and unambiguous
 - [ ] Non-goals section defines clear boundaries
 - [ ] Saved to `ralph/tasks/prd-<feature-name>.md`

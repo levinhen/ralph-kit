@@ -51,6 +51,14 @@ If you already have a valid `prd.json`, you can initialize the run directory wit
 ralph/scripts/create-run.sh <run_id> path/to/prd.json
 ```
 
+After writing the run files, always lint the PRD and fix everything it reports before handing the run to `ralph.sh`:
+
+```bash
+bash ralph/scripts/lint-prd.sh --run <run_id>
+```
+
+The lint rejects dangling, forward, self, and cyclic `dependsOn` references, and `dependsOnRuns` entries that point at runs which do not exist. `ralph.sh` runs the same lint at startup and refuses to start on a failing PRD.
+
 ---
 
 ## Validate the Approach Before Splitting Stories
@@ -92,6 +100,7 @@ execution. Do this first:
   "branchName": "ralph/[feature-name-kebab-case]",
   "description": "[Feature description from PRD title/intro]",
   "userNeed": "[The confirmed business-language restatement of what the user actually needs — from the PRD Introduction/Overview]",
+  "dependsOnRuns": [],
   "userStories": [
     {
       "id": "US-001",
@@ -102,6 +111,7 @@ execution. Do this first:
         "Criterion 2",
         "Typecheck passes"
       ],
+      "dependsOn": [],
       "priority": 1,
       "passes": false,
       "notes": ""
@@ -109,6 +119,17 @@ execution. Do this first:
   ]
 }
 ```
+
+Two dependency fields make the decomposition auditable:
+
+- **`dependsOn`** (per story): ids of stories in this same run that must be complete before this one — because it
+  builds on their code **or because verifying it needs something they create** (a test runner, seed data, an endpoint).
+  Every dependency must sit **earlier in the `userStories` array** than the story that names it; the array order is the
+  execution order.
+- **`dependsOnRuns`** (root): run ids of other Ralph runs whose changes must already be merged back into the base
+  branch before this run starts — this run's worktree is created from the base branch, so an unmerged upstream run is
+  invisible to it. Leave `[]` when the run is independent. See
+  [Prefer Multiple Runs Over One Big Run](#prefer-multiple-runs-over-one-big-run).
 
 Write `userNeed` **once, at the root**. You do not copy it into each story by hand — when `ralph.sh` splits the PRD
 into per-story files, it copies the root `userNeed` into every `stories/<id>.json` automatically, so each memoryless
@@ -166,7 +187,9 @@ of context before finishing and produces broken code.
 
 ## Story Ordering: Dependencies First
 
-Stories execute in priority order. Earlier stories must not depend on later ones.
+Stories execute strictly in **array order** — `ralph.sh` always picks the first story with `passes != true`. Keep the
+`priority` numbers consistent with the array order, but understand that the array order is what actually runs. Earlier
+stories must not depend on later ones.
 
 **Correct order:**
 
@@ -179,6 +202,19 @@ Stories execute in priority order. Earlier stories must not depend on later ones
 
 1. UI component (depends on schema that does not exist yet)
 2. Schema change
+
+**Make every dependency explicit in `dependsOn`.** Ordering the array correctly is not enough — write the actual
+dependency edges into each story's `dependsOn` so the decomposition can be checked mechanically. Count both kinds of
+dependency:
+
+- **Build dependencies:** the story's code builds on another story's output (the UI story needs the schema story).
+- **Verification dependencies:** checking the story's acceptance criteria needs something another story creates — a
+  test harness, seed data, a running endpoint, a page to open. A story you cannot verify yet is just as blocked as a
+  story you cannot build yet.
+
+`lint-prd.sh` (run automatically by `ralph.sh` at startup) rejects a `dependsOn` that names a missing story, names the
+story itself, points forward in the array, or forms a cycle. If the lint forces you to move a story earlier, that is
+the decomposition telling you the original order was wrong.
 
 ---
 
@@ -231,6 +267,42 @@ claim a verification it did not perform.
 
 ---
 
+## Verification Closure: Every Story Must Verify Itself in Its Own Round
+
+Verifiable wording is not enough. Each criterion must also be **observable in the same round that implements the
+story**, using only what exists once that story's own work (plus its `dependsOn` stories) is done. A story whose
+criteria can only be checked after some *later* story lands is almost guaranteed to fail: the round either stalls
+looking for a verification it cannot perform, or marks the story passing dishonestly. Either way the run stops and the
+split has to be redone — so catch it now, at conversion time.
+
+**The dry-run check.** After splitting, walk every story and ask, criterion by criterion:
+
+> *"When the agent finishes implementing this story, what command does it run — or what does it open and look at — to
+> observe this criterion, in that same round?"*
+
+Every criterion needs a concrete answer: a test command, a typecheck, a migration that applies cleanly, an endpoint to
+curl, a page to open and a thing to see on it. If the honest answer involves a later story or infrastructure nobody has
+built yet, the split is wrong — fix the split, not the wording.
+
+**The three classic failures and their fixes:**
+
+1. **The observation point lives in a later story.** A schema story's criterion says "the badge shows the priority",
+   but the badge arrives in US-003. → Move that criterion to the story that owns the observation point, and give the
+   schema story its own observable outcome (the migration applies; a query returns the new column).
+2. **The story has no observable outlet at all.** A pure-backend story with no test, no caller, and no endpoint —
+   "Typecheck passes" is the only checkable line, so the real behavior goes unverified. → Add a genuine outlet to the
+   story itself (a unit/integration test named in the criteria), or merge it with its first consumer into one vertical
+   slice that can be observed end to end.
+3. **The verification infrastructure arrives later.** The criteria assume a test runner, seed data, or a running dev
+   server that a later story sets up. → Reorder so the infrastructure story comes first, and record the edge in
+   `dependsOn` — verification dependencies are dependencies.
+
+When a story fails the dry-run check, prefer **re-slicing vertically** (one thin end-to-end capability per story) over
+padding criteria: a vertical slice always carries its own observation point, while horizontal layers have to borrow
+one from the future.
+
+---
+
 ## Conversion Rules
 
 1. **Each user story becomes one JSON entry**
@@ -246,6 +318,12 @@ claim a verification it did not perform.
    kebab-case suffix prefixed with `ralph/`. This branch is meant to be created from the repository's current
    checked-out local branch, not from an assumed default branch.
 9. **Always add**: "Typecheck passes" to every story's acceptance criteria
+10. **dependsOn**: Every story lists its real build **and verification** dependencies by story id. Dependencies may
+    only point at earlier array entries. Omit or leave `[]` for genuinely independent stories — do not fabricate a
+    linear chain.
+11. **dependsOnRuns**: At the root, list the run ids this run needs merged back first; `[]` when independent.
+12. **Lint before handoff**: `bash ralph/scripts/lint-prd.sh --run <run_id>` must pass; fix reported errors by fixing
+    the split, not by deleting the dependency fields.
 
 ### Branch and Worktree Rules
 
@@ -280,6 +358,38 @@ Each is one focused change that can be completed and verified independently.
 
 ---
 
+## Prefer Multiple Runs Over One Big Run
+
+A run is Ralph's unit of isolation and delivery: its own branch, worktree, state, merge-back, and archive. When the
+work is really several separable deliverables, **split it into several runs** instead of one long story list, and let
+the orchestrator execute the run graph. Lean toward splitting when:
+
+- the story list heads past roughly 8–10 stories;
+- the work contains milestones that are independently mergeable and useful (a data layer, then features on top);
+- distinct subsystems barely share code — separate runs let them proceed in parallel worktrees;
+- part of the work is riskier or more exploratory — isolating it keeps a failure from freezing the rest.
+
+Rules for a multi-run split:
+
+1. **Each run must close its own loop.** A run ends with the base branch containing a coherent, verified increment —
+   all of that run's stories pass and the branch merges back cleanly. Never split so that a run ends in a half-wired
+   state only a later run can make sense of; the run boundary is a merge boundary.
+2. **Declare the edges in `dependsOnRuns`.** A run that builds on another run's code lists that run's id. The
+   dependency means "must already be merged back into the base branch", because each run's worktree is created from
+   the base branch — an unmerged upstream run simply is not visible downstream.
+3. **Keep independent runs independent.** No `dependsOnRuns` entry means the orchestrator may run them in parallel;
+   do not add fake edges for sequencing comfort.
+4. **Apply the same closure check at run level.** Ask of each run: "when this run's stories all pass, what does the
+   base branch observably do that it could not do before?" A run with no answer is a layer, not a deliverable — merge
+   it into the run that consumes it.
+
+`orchestrate.sh` reads `dependsOnRuns` across `ralph/runs/*/prd.json`, starts every run whose dependencies are already
+merged back (or archived), runs independent runs in parallel, and blocks a run's downstream when it fails. Completed
+runs are archived by the consolidation round or `archive-runs.sh`, so the runs directory stays a worklist of what is
+still in play.
+
+---
+
 ## Example
 
 **Input PRD:**
@@ -304,6 +414,7 @@ Add ability to mark tasks with different statuses.
   "branchName": "ralph/task-status",
   "description": "Task Status Feature - Track task progress with status indicators",
   "userNeed": "People managing a task list can't tell what's underway versus done, so things get dropped or duplicated. They want to see each task's progress at a glance, update it as work moves along, and narrow the list to whatever they're focused on.",
+  "dependsOnRuns": [],
   "userStories": [
     {
       "id": "US-001",
@@ -314,6 +425,7 @@ Add ability to mark tasks with different statuses.
         "Generate and run migration successfully",
         "Typecheck passes"
       ],
+      "dependsOn": [],
       "priority": 1,
       "passes": false,
       "notes": ""
@@ -328,6 +440,7 @@ Add ability to mark tasks with different statuses.
         "Typecheck passes",
         "Verified in a browser: each card's badge color matches that task's status"
       ],
+      "dependsOn": ["US-001"],
       "priority": 2,
       "passes": false,
       "notes": ""
@@ -343,6 +456,7 @@ Add ability to mark tasks with different statuses.
         "Typecheck passes",
         "Verified in a browser: changing a row's status updates the row without a reload"
       ],
+      "dependsOn": ["US-001", "US-002"],
       "priority": 3,
       "passes": false,
       "notes": ""
@@ -357,6 +471,7 @@ Add ability to mark tasks with different statuses.
         "Typecheck passes",
         "Verified in a browser: picking a filter narrows the list and updates the URL"
       ],
+      "dependsOn": ["US-001"],
       "priority": 4,
       "passes": false,
       "notes": ""
@@ -364,6 +479,10 @@ Add ability to mark tasks with different statuses.
   ]
 }
 ```
+
+Note the edges: US-003 depends on US-002 as a **verification** dependency — observing "the row updates without a
+reload" needs the badge from US-002 on screen — while US-004 needs only the schema, so it does not inherit a fake edge
+through US-002/US-003.
 
 ---
 
@@ -387,9 +506,10 @@ If the source PRD has `status: merged` frontmatter (such PRDs live under `ralph/
    - Override and re-run anyway (rare).
 2. When writing stories that touch areas listed in the PRD's `superseded-by`, read those ledger files first and base your acceptance criteria on the current design, not on what the historical PRD says.
 
-The `ralph.sh` script discovers run-scoped PRDs and starts them with `--run <run_id>`. On startup it creates per-story
-files under `stories/`, injects only the current story plus sliced shared memory and recent per-story records into the
-agent prompt, and syncs story files back into the run PRD after each iteration. Per-story records are appended one JSON
+The `ralph.sh` script discovers run-scoped PRDs and starts them with `--run <run_id>`. On startup it lints the PRD
+(`lint-prd.sh`), refuses to start while a `dependsOnRuns` entry is not yet merged back, creates per-story files under
+`stories/`, injects only the current story plus sliced shared memory and recent per-story records into the agent
+prompt, and syncs story files back into the run PRD after each iteration. Per-story records are appended one JSON
 object per line into `progress/<story_id>.jsonl`.
 
 ---
@@ -411,3 +531,7 @@ Before writing run-scoped `prd.json`, verify:
 - [ ] UI stories have a "Verified in a browser: ..." criterion naming what to look at, with no tool or skill name in it
 - [ ] Acceptance criteria are verifiable (not vague)
 - [ ] No story depends on a later story
+- [ ] Verification closure dry-run done: every criterion is observable in its own story's round
+- [ ] `dependsOn` records the real build and verification edges (no fabricated linear chain)
+- [ ] Considered splitting into multiple runs; any run-level edges are declared in `dependsOnRuns`
+- [ ] `bash ralph/scripts/lint-prd.sh --run <run_id>` reports OK

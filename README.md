@@ -84,7 +84,7 @@ It deliberately does **not** implement anything. The PRD is the human-reviewable
 Run `/ralph` on the PRD. This is a thinking step, not a transcription step:
 
 1. **Approach validation** — it recovers the user's actual need from the PRD intro, sanity-checks the solution baked into the PRD, and stops to discuss with you if a clearly better approach exists.
-2. **Story splitting** — it re-derives stories from the agreed approach. The number-one rule: **each story must be completable inside one agent context window** ("add a column + migration" is right-sized; "build the whole dashboard" is not). Stories are ordered so dependencies come first (schema → backend → UI), and every acceptance criterion must be mechanically checkable ("typecheck passes", not "works well").
+2. **Story splitting** — it re-derives stories from the agreed approach. The number-one rule: **each story must be completable inside one agent context window** ("add a column + migration" is right-sized; "build the whole dashboard" is not). Stories are ordered so dependencies come first (schema → backend → UI), and every real edge — build *and verification* dependencies — is written into each story's `dependsOn`. Every acceptance criterion must be mechanically checkable ("typecheck passes", not "works well") **and observable inside the story's own round**: a criterion only a later story can demonstrate means the split is wrong, not the wording. Work that is really several independent deliverables becomes several runs linked by root-level `dependsOnRuns` instead of one long story list.
 3. **Run scaffolding** — it writes `ralph/runs/<run_id>/`:
 
 ```
@@ -104,6 +104,8 @@ Two fields make memoryless execution work:
 
 (Already have a `prd.json`? `ralph/scripts/create-run.sh <run_id> path/to/prd.json` scaffolds the same layout.)
 
+`ralph/scripts/lint-prd.sh --run <run_id>` validates the result: dangling, forward, self, or cyclic `dependsOn` edges and `dependsOnRuns` entries naming runs that don't exist are all rejected. `ralph.sh` runs the same lint at startup and refuses to start on a failing PRD.
+
 ### Stage 3 — Execute: `ralph.sh` loops one fresh agent per story
 
 ```sh
@@ -115,7 +117,8 @@ ralph/scripts/ralph.sh --run <run_id> --tool claude 20   # or --tool codex (defa
 1. Pick the run (`--run`, or an interactive selector listing incomplete runs) and take a lock dir `ralph/locks/run-<run_id>.lock` so the same run can't start twice.
 2. Read `state.json`; backfill `baseBranch`/`baseSha` from the current checkout if missing.
 3. Create (or reuse) a git worktree at `.worktrees/<run_id>` checked out on `branchName` (e.g. `ralph/<feature>`), branched from the base branch, and copy the run's inputs into it if they aren't there yet. The whole run happens inside the worktree — your main checkout stays untouched.
-4. Split `prd.json` into per-story files `stories/US-xxx.json`, copying the root `userNeed` into each.
+4. Gate on `dependsOnRuns`: every run this one depends on must already be merged back into the base branch (or archived), because the worktree is a base-branch snapshot that cannot see unmerged work. Unmet dependencies stop the start (`RALPH_IGNORE_RUN_DEPS=1` downgrades that to a warning); then the PRD is linted (`lint-prd.sh`) and a failing PRD also refuses to start.
+5. Split `prd.json` into per-story files `stories/US-xxx.json`, copying the root `userNeed` into each.
 
 **Each story round:**
 
@@ -129,8 +132,8 @@ ralph/scripts/ralph.sh --run <run_id> --tool claude 20   # or --tool codex (defa
 4. The agent, per its playbook: implements **exactly that one story** (only the slice named in `Covers:`), runs the project's quality checks (typecheck/lint/tests), flips the story file to `passes: true` and writes `notes`, appends a structured progress record via `append-progress-json.sh` (one JSON line into `progress/<story_id>.jsonl`, plus optional `--shared-memory` items for reusable patterns), and commits everything as `feat: [US-xxx] - [Title]`.
    Every agent round also receives a shared **Round Commit Contract**: all intended repository artifacts produced by that round must be committed before it ends, rather than being left for a later story, finalization, merge-back, or consolidation round. A safe, coherent partial result is committed as a checkpoint while the story remains incomplete. Runtime markers, temporary diagnostics, and artifact-free idempotent retries do not require empty commits.
 5. The loop syncs story state back into `prd.json` (amending it into the story commit when safe) and **trusts only the file**. If the current story now has `passes: true`, Ralph advances normally. If it still has `passes != true`—regardless of what the agent claimed—Ralph does not retry the implementation round.
-6. An incomplete story triggers exactly one dedicated **failure diagnosis round** (`DIAGNOSE_FAILURE.md`). It receives the story, recent progress, Git heads, the previous agent message, and raw tool events when available. The diagnosis runs with read-only agent permissions, prints a structured root-cause report to the terminal, and exits `1`; every later round is skipped.
-7. Successful story rounds repeat until every story passes. There is no round budget: because a failed story ends the run at step 6, the story loop can only move forward through the backlog. The wrap-up rounds are the ones that can retry themselves, so each carries its own small budget (see `RALPH_MAX_*_ROUNDS` below).
+6. An incomplete story triggers exactly one dedicated **failure diagnosis round** (`DIAGNOSE_FAILURE.md`). It receives the story, recent progress, Git heads, the previous agent message, and raw tool events when available, runs with read-only agent permissions, and produces a structured root-cause report. That report then feeds exactly one **escalated recovery round** (`RECOVER_STORY.md`): a fresh write-capable agent, launched with a higher reasoning budget (`RALPH_*_RECOVERY_ARGS`; codex defaults to `-c model_reasoning_effort=xhigh`), that starts from the diagnosis and makes the last automatic attempt at the story. If the story passes now, the loop advances normally; if it still fails, Ralph prints both the diagnosis report and the recovery round's closing message, then exits `1` — every later round is skipped.
+7. Successful story rounds repeat until every story passes. There is no round budget: because a story that fails even its recovery round ends the run at step 6, the story loop can only move forward through the backlog. The wrap-up rounds are the ones that can retry themselves, so each carries its own small budget (see `RALPH_MAX_*_ROUNDS` below).
 
 Interactive terminals keep a progress bar pinned to the bottom row while agent logs scroll above it:
 
@@ -207,10 +210,13 @@ Every round starts cold, so all memory is files:
 ### Running several runs: `orchestrate.sh`
 
 ```sh
-ralph/scripts/orchestrate.sh --tool claude --plan "1 > 2,3 > 4"
+ralph/scripts/orchestrate.sh --tool claude                        # graph mode: schedules from dependsOnRuns
+ralph/scripts/orchestrate.sh --tool claude --plan "1 > 2,3 > 4"   # manual staged plan
 ```
 
-Lists incomplete runs, numbers them, and executes a staged plan: `,` = parallel within a stage, `>` = next stage. Parallel runs write to per-run log files; a failed or rate-limited stage stops the orchestrator. Per-run locks plus a per-base-branch merge lock keep parallel runs from stepping on each other.
+With no `--plan`, the orchestrator reads `dependsOnRuns` across the incomplete runs and schedules the graph: every run whose dependencies have already merged back starts immediately, independent runs execute in parallel, a failed run blocks only its transitive downstream, and the closing summary lists succeeded / failed / blocked. `--graph` forces this mode even when no run declares an edge; `--dry-run` previews the waves without executing.
+
+`--plan "1 > 2,3 > 4"` keeps the manual staged plan: `,` = parallel within a stage, `>` = next stage, and a failed stage stops the orchestrator. In both modes parallel runs write to per-run log files, a rate-limited run stops everything, and per-run locks plus a per-base-branch merge lock keep parallel runs from stepping on each other.
 
 ### Flags & environment
 
@@ -230,8 +236,11 @@ Lists incomplete runs, numbers them, and executes a staged plan: `,` = parallel 
 | `RALPH_PRICE_MODEL` | `gpt-5.6-sol` | model label shown next to an estimated cost |
 | `RALPH_NOTIFY` / `RALPH_NOTIFY_SOUND` | `1` | desktop notifications |
 | `RALPH_PLAN` | — | default plan for `orchestrate.sh` |
+| `RALPH_IGNORE_RUN_DEPS` | `0` | `1` starts a run even when its `dependsOnRuns` have not merged back yet |
+| `RALPH_CODEX_RECOVERY_ARGS` | `-c model_reasoning_effort=xhigh` | extra codex args for the escalated recovery round |
+| `RALPH_CLAUDE_RECOVERY_ARGS` / `RALPH_PI_RECOVERY_ARGS` | — | extra claude / pi args for the escalated recovery round |
 
-Exit codes: `0` complete, `1` story failed after diagnosis / a wrap-up round exhausted its budget, `75` rate-limited, `124` tool timeout.
+Exit codes: `0` complete, `1` story failed after diagnosis + recovery / a wrap-up round exhausted its budget, `75` rate-limited, `124` tool timeout.
 
 ## Install
 

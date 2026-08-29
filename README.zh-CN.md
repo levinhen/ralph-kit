@@ -82,7 +82,7 @@ consolidation 回合   沉淀运行学到的设计 → docs/design-ledger/
 对 PRD 运行 `/ralph`。这是一个思考步骤，不是机械转录：
 
 1. **方案校验** —— 从 PRD 的引言里还原用户的真实诉求，审视 PRD 中隐含的实现方案；如果存在明显更优的做法，先停下来与你确认方向。
-2. **故事拆分** —— 从确认后的方案重新推导故事。第一铁律：**每个故事必须能在一个 agent 上下文窗口内完成**（"加一列字段 + 迁移"是合适的粒度，"做完整个看板"不是）。故事按依赖排序（schema → 后端 → UI），每条验收标准都必须可机械验证（"typecheck 通过"可以，"工作正常"不行）。
+2. **故事拆分** —— 从确认后的方案重新推导故事。第一铁律：**每个故事必须能在一个 agent 上下文窗口内完成**（"加一列字段 + 迁移"是合适的粒度，"做完整个看板"不是）。故事按依赖排序（schema → 后端 → UI），且每条真实依赖——构建依赖*和验证依赖*——都要显式写进故事的 `dependsOn`。每条验收标准都必须可机械验证（"typecheck 通过"可以，"工作正常"不行），**并且在本故事自己的回合内就能观察到**：一条要等后面的故事落地才能验证的标准，说明拆错的是故事而不是措辞。真正由多个独立可交付物组成的工作，应拆成多个 run、用根级 `dependsOnRuns` 连接，而不是堆成一条超长故事列表。
 3. **run 脚手架** —— 写出 `ralph/runs/<run_id>/`：
 
 ```
@@ -102,6 +102,8 @@ ralph/runs/<run_id>/
 
 （已经有现成的 `prd.json`？用 `ralph/scripts/create-run.sh <run_id> path/to/prd.json` 可以生成同样的脚手架。）
 
+`ralph/scripts/lint-prd.sh --run <run_id>` 负责校验产物：悬空、前向、自引用或成环的 `dependsOn`，以及指向不存在 run 的 `dependsOnRuns`，都会被拒绝。`ralph.sh` 启动时也会跑同一个 lint，PRD 不过就拒绝启动。
+
 ### 阶段 3 —— 执行：`ralph.sh` 循环，每个故事一个全新 agent
 
 ```sh
@@ -113,7 +115,8 @@ ralph/scripts/ralph.sh --run <run_id> --tool claude 20   # 或 --tool codex（�
 1. 选定 run（`--run` 指定，或交互式列出未完成的 run 供选择），并占用锁目录 `ralph/locks/run-<run_id>.lock`，防止同一 run 被启动两次。
 2. 读取 `state.json`；缺失的 `baseBranch`/`baseSha` 用当前检出状态回填。
 3. 在 `.worktrees/<run_id>` 创建（或复用）git worktree，检出 `branchName`（如 `ralph/<feature>`，从基线分支创建），并在缺失时把 run 的输入文件复制进去。整个 run 都发生在 worktree 里——你的主工作区不受影响。
-4. 把 `prd.json` 拆成单故事文件 `stories/US-xxx.json`，并把根级 `userNeed` 复制进每个文件。
+4. 检查 `dependsOnRuns` 门槛：本 run 依赖的每个 run 都必须已经 merge 回基线分支（或已归档），因为 worktree 是基线分支的快照，看不见未合并的工作。依赖未满足就拒绝启动（`RALPH_IGNORE_RUN_DEPS=1` 可降级为警告）；随后对 PRD 跑 lint（`lint-prd.sh`），lint 不过同样拒绝启动。
+5. 把 `prd.json` 拆成单故事文件 `stories/US-xxx.json`，并把根级 `userNeed` 复制进每个文件。
 
 **每个故事轮：**
 
@@ -127,8 +130,8 @@ ralph/scripts/ralph.sh --run <run_id> --tool claude 20   # 或 --tool codex（�
 4. agent 按手册行事：只实现**这一个故事**（只做 `Covers:` 指明的那一块），跑项目的质量检查（typecheck/lint/测试），把故事文件改为 `passes: true` 并写下 `notes`，用 `append-progress-json.sh` 追加结构化进度记录（一行 JSON 写进 `progress/<story_id>.jsonl`，可选 `--shared-memory` 沉淀可复用模式），最后以 `feat: [US-xxx] - [标题]` 提交全部变更。
    每个 agent 回合都会收到统一的 **Round Commit Contract**：本轮产生的所有预期仓库产物必须在本轮结束前提交，不能留给后续 story、finalization、merge-back 或 consolidation 代为提交；若只形成了安全且完整的阶段性成果，则提交 checkpoint，但仍保持故事未完成。运行时 marker、临时诊断文件和无产物的幂等重试不要求空提交。
 5. 循环把故事状态同步回 `prd.json`（安全时 amend 进故事提交），并且**只认文件**。当前故事变为 `passes: true` 才正常进入下一故事；只要仍是 `passes != true`，无论 agent 口头上如何声明，都不会再重跑实现轮。
-6. 未完成的故事只会额外触发一次专门的**失败诊断轮**（`DIAGNOSE_FAILURE.md`）。它会拿到当前故事、近期进度、前后 Git HEAD、上一轮 agent 消息，以及可用时的原始失败事件；诊断 agent 以只读权限运行，把结构化的根因报告打印到终端后退出 `1`，后续轮次全部跳过。
-7. 只有成功的故事轮会继续，直到所有故事通过。循环没有总轮数预算：故事一旦失败就在第 6 步终止整次运行，所以故事循环只会沿着待办列表单向前进。真正可能自我重试的是收尾轮，它们各自带一个小预算（见下方 `RALPH_MAX_*_ROUNDS`）。
+6. 未完成的故事只会额外触发一次专门的**失败诊断轮**（`DIAGNOSE_FAILURE.md`）。它会拿到当前故事、近期进度、前后 Git HEAD、上一轮 agent 消息，以及可用时的原始失败事件；诊断 agent 以只读权限运行，产出结构化的根因报告。该报告随即喂给恰好一次**升级修复轮**（`RECOVER_STORY.md`）：一个全新的、有写权限的 agent，以更高的推理预算启动（`RALPH_*_RECOVERY_ARGS`；codex 默认注入 `-c model_reasoning_effort=xhigh`），从诊断结论出发做本故事的最后一次自动尝试。修复后故事通过，循环正常前进；仍不通过，Ralph 会把诊断报告和修复轮的收尾消息一并打印，然后退出 `1`，后续轮次全部跳过。
+7. 只有成功的故事轮会继续，直到所有故事通过。循环没有总轮数预算：连修复轮都救不回来的故事会在第 6 步终止整次运行，所以故事循环只会沿着待办列表单向前进。真正可能自我重试的是收尾轮，它们各自带一个小预算（见下方 `RALPH_MAX_*_ROUNDS`）。
 
 交互式终端的最底部会常驻一条进度栏，上方的 agent 日志照常滚动：
 
@@ -205,10 +208,13 @@ pi 的诊断轮防护更弱，这是明知的取舍：pi 自身不提供沙箱�
 ### 多 run 编排：`orchestrate.sh`
 
 ```sh
-ralph/scripts/orchestrate.sh --tool claude --plan "1 > 2,3 > 4"
+ralph/scripts/orchestrate.sh --tool claude                        # 图模式：按 dependsOnRuns 调度
+ralph/scripts/orchestrate.sh --tool claude --plan "1 > 2,3 > 4"   # 手工阶段计划
 ```
 
-列出未完成的 run 并编号，然后按阶段执行计划：`,` 表示同阶段并行，`>` 表示进入下一阶段。并行 run 的输出写入各自的日志文件；任一阶段失败或命中限流即停止编排。run 级锁加基线分支级合并锁，保证并行 run 互不踩踏。
+不带 `--plan` 时，编排器读取各未完成 run 的 `dependsOnRuns` 并按依赖图调度：依赖已全部 merge 回基线的 run 立即启动，互相独立的 run 并行执行，某个 run 失败只会阻塞它的传递下游，收尾时汇总列出成功 / 失败 / 被阻塞三组。`--graph` 可在没有任何依赖声明时也强制图模式；`--dry-run` 只预览波次不执行。
+
+`--plan "1 > 2,3 > 4"` 保留手工阶段计划：`,` 表示同阶段并行，`>` 表示进入下一阶段，任一阶段失败即停止编排。两种模式下并行 run 的输出都写入各自的日志文件，命中限流会停止一切；run 级锁加基线分支级合并锁，保证并行 run 互不踩踏。
 
 ### 参数与环境变量
 
@@ -228,8 +234,11 @@ ralph/scripts/orchestrate.sh --tool claude --plan "1 > 2,3 > 4"
 | `RALPH_PRICE_MODEL` | `gpt-5.6-sol` | 估算成本时显示的模型标签 |
 | `RALPH_NOTIFY` / `RALPH_NOTIFY_SOUND` | `1` | 桌面通知 |
 | `RALPH_PLAN` | — | `orchestrate.sh` 的默认计划 |
+| `RALPH_IGNORE_RUN_DEPS` | `0` | 设为 `1` 时，即使 `dependsOnRuns` 尚未 merge 回基线也照常启动 |
+| `RALPH_CODEX_RECOVERY_ARGS` | `-c model_reasoning_effort=xhigh` | 升级修复轮附加给 codex 的额外参数 |
+| `RALPH_CLAUDE_RECOVERY_ARGS` / `RALPH_PI_RECOVERY_ARGS` | — | 升级修复轮附加给 claude / pi 的额外参数 |
 
-退出码：`0` 全部完成，`1` 故事失败且已诊断/某个收尾轮用尽预算，`75` 命中限流，`124` 工具超时。
+退出码：`0` 全部完成，`1` 故事经诊断与修复后仍失败/某个收尾轮用尽预算，`75` 命中限流，`124` 工具超时。
 
 ## 安装
 

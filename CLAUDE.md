@@ -45,6 +45,20 @@ npm test
   them from `SCRIPT_DIR` and folds them into a temporary prompt file, so a new
   prompt file needs no worktree copy and no entry in `sync_root_ralph_inputs`.
   Copying them into the worktree is what used to go stale — do not add it back.
+- **"Still in flight" is a directory fact both skills bet on.** `/prd` and `/ralph`
+  open by sweeping `ralph/tasks/` and `ralph/runs/` and reading whatever is left
+  there as written-but-unfinished. That only holds because consolidation moves a
+  finished run *and* its source PRD into `ralph/archive/<date>-<run_id>/` — the
+  sweep has no other source of truth, so changing what archiving moves, or when,
+  silently turns finished work back into "in flight" in both skills and both
+  READMEs. What the sweep feeds is one rule: neither skill re-specifies a slice an
+  in-flight PRD already owns. It may overturn that design, but the replacement
+  lands in the PRD being written now, naming what it supersedes — and where the old
+  design is already code on a part-run branch, changing that code is carried as
+  real stories rather than assumed away. `/ralph` reads the same sweep for a second
+  thing: an in-flight run is the only place a `dependsOnRuns` edge can be
+  discovered, since the lint rejects an entry naming a run that does not exist but
+  cannot notice one that was never written.
 - **The dependency fields have seven consumers.** `dependsOn` (story-level) and
   `dependsOnRuns` (run-level) are documented in the ralph skill, enforced by
   `lint-prd.sh`, gated at `ralph.sh` startup, scheduled from by

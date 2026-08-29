@@ -78,14 +78,16 @@ You do not have to judge what counts as unfinished. A run and its source PRD mov
 `ralph/tasks/` or `ralph/runs/` is in flight by definition**:
 
 ```bash
-ls ralph/tasks/prd-*.md 2>/dev/null       # PRDs written, not yet finished
-ls ralph/prd.json 2>/dev/null             # a legacy-mode run, if this project has one
-for d in ralph/runs/*/; do
-  [ -f "$d/prd.json" ] || continue
-  printf '%s ' "$d"
-  jq -r '"\(.userStories | map(select(.passes == true)) | length)/\(.userStories | length) stories passing"' "$d/prd.json"
+find ralph/tasks -maxdepth 1 -name 'prd-*.md' 2>/dev/null | sort   # PRDs written, not yet finished
+ls ralph/prd.json 2>/dev/null                                      # a legacy-mode run, if this project has one
+find ralph/runs -maxdepth 2 -name prd.json 2>/dev/null | sort | while read -r f; do
+  printf '%s ' "$(dirname "$f")"
+  jq -r '"\(.userStories | map(select(.passes == true)) | length)/\(.userStories | length) stories passing"' "$f"
 done
 ```
+
+(`find` rather than a `ralph/runs/*/` glob: an unmatched glob aborts the command outright under zsh, which is exactly
+the case you hit on a project that has no runs yet.)
 
 For any run that looks like it overlaps the PRD in front of you, read its stories rather than just its counts:
 

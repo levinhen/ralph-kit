@@ -47,11 +47,10 @@ You do not have to judge what counts as unfinished. Ralph moves a run and its so
 `ralph/tasks/` or `ralph/runs/` is in flight by definition.** Sweep both, and read how far each one has got:
 
 ```bash
-ls ralph/tasks/prd-*.md 2>/dev/null
-for d in ralph/runs/*/; do
-  [ -f "$d/prd.json" ] || continue
-  printf '%s ' "$d"
-  jq -r '"\(.userStories | map(select(.passes == true)) | length)/\(.userStories | length) stories passing"' "$d/prd.json"
+find ralph/tasks -maxdepth 1 -name 'prd-*.md' 2>/dev/null | sort
+find ralph/runs -maxdepth 2 -name prd.json 2>/dev/null | sort | while read -r f; do
+  printf '%s ' "$(dirname "$f")"
+  jq -r '"\(.userStories | map(select(.passes == true)) | length)/\(.userStories | length) stories passing"' "$f"
 done
 ```
 

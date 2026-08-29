@@ -31,13 +31,13 @@ Everything Ralph generates lives under `ralph/` — its code, runtime state, and
 ### Pipeline overview
 
 ```
-/prd skill (chat: clarify → confirm the need in business language)
+/prd skill (chat: sweep what's in flight → clarify → confirm the need)
         │
         ▼
 ralph/tasks/prd-<feature>.md          human-readable PRD
         │
-        │  /ralph skill (validate the approach → split into
-        │  one-context-window stories)
+        │  /ralph skill (sweep in-flight runs → validate the approach
+        │  → split into one-context-window stories)
         ▼
 ralph/runs/<run_id>/prd.json          machine-readable run
   + state.json + progress/            (stories, userNeed, branchName)
@@ -74,21 +74,25 @@ archive              ralph/runs/<id> + ralph/tasks/prd-<id>.md
 
 In a Claude Code chat, run `/prd` and describe the feature. The skill:
 
-1. asks clarifying questions (lettered options, blocking questions first),
-2. keeps following up until the key ambiguities are resolved,
-3. restates the need in plain business language and waits for your confirmation,
-4. writes `ralph/tasks/prd-<feature>.md` — goals, user stories with verifiable acceptance criteria, functional requirements, non-goals, open questions.
+1. **sweeps the PRDs already in flight** and reports them, unprompted, before it asks you anything,
+2. asks clarifying questions (lettered options, blocking questions first),
+3. keeps following up until the key ambiguities are resolved,
+4. restates the need in plain business language and waits for your confirmation,
+5. writes `ralph/tasks/prd-<feature>.md` — goals, user stories with verifiable acceptance criteria, functional requirements, non-goals, open questions.
 
 It deliberately does **not** implement anything. The PRD is the human-reviewable contract.
+
+**About that sweep.** A finished run and its source PRD are moved into `ralph/archive/`, so whatever is still in `ralph/tasks/` or `ralph/runs/` is by definition written-but-unfinished — no bookkeeping required, the directories *are* the state. The skill reads both and tells you what it found and how far each has run (`2/5 stories passing`), because how far a PRD has run decides what changing its design costs. Nothing already designed gets re-specified: overlap goes into this PRD's **Non-Goals** naming the PRD that owns it. You are not stuck with an earlier decision either — the new PRD may overturn one, but the replacement design lands *in the new PRD*, naming what it supersedes, and if the old design is already code on a part-run branch then changing that code is carried as real user stories here rather than wished away.
 
 ### Stage 2 — Convert: `/ralph` turns the PRD into an executable run
 
 Run `/ralph` on the PRD. This is a thinking step, not a transcription step:
 
-1. **Approach validation** — it recovers the user's actual need from the PRD intro, sanity-checks the solution baked into the PRD, and stops to discuss with you if a clearly better approach exists.
-2. **Story splitting** — it re-derives stories from the agreed approach. The number-one rule: **each story must be completable inside one agent context window** ("add a column + migration" is right-sized; "build the whole dashboard" is not). Stories are ordered so dependencies come first (schema → backend → UI), and every real edge — build *and verification* dependencies — is written into each story's `dependsOn`. Every acceptance criterion must be mechanically checkable ("typecheck passes", not "works well") **and observable inside the story's own round**: a criterion only a later story can demonstrate means the split is wrong, not the wording. Work that is really several independent deliverables becomes several runs linked by root-level `dependsOnRuns` instead of one long story list.
-3. **Dependency audit** — the splitting agent does not get to sign off on its own graph. A *separate* agent, given only the source PRD and the finished `prd.json` and never the splitter's reasoning, re-derives every `dependsOn` edge and re-checks that the `Covers:` clauses tile `userNeed`. Its findings are applied (or rejected in writing) and the resolved graph is recorded in `deps-audit.json`. The point is the missing *verification* edge — a story scheduled before the thing that would let anyone observe it is done, which no amount of implementation effort inside that story can fix.
-4. **Run scaffolding** — it writes `ralph/runs/<run_id>/`:
+1. **In-flight sweep** — the same sweep as Stage 1, read for a different purpose. An in-flight run is where root-level `dependsOnRuns` comes from: the lint rejects an entry pointing at a run that does not exist, but nothing can notice an edge you never knew to write. It also stops this run from re-splitting a slice another run already owns (two branches editing the same files, colliding at merge-back), and it keeps criteria off code that only exists on an unmerged branch — this run's worktree is cut from the base branch, so another run's passing story is invisible here until it merges back.
+2. **Approach validation** — it recovers the user's actual need from the PRD intro, sanity-checks the solution baked into the PRD, and stops to discuss with you if a clearly better approach exists.
+3. **Story splitting** — it re-derives stories from the agreed approach. The number-one rule: **each story must be completable inside one agent context window** ("add a column + migration" is right-sized; "build the whole dashboard" is not). Stories are ordered so dependencies come first (schema → backend → UI), and every real edge — build *and verification* dependencies — is written into each story's `dependsOn`. Every acceptance criterion must be mechanically checkable ("typecheck passes", not "works well") **and observable inside the story's own round**: a criterion only a later story can demonstrate means the split is wrong, not the wording. Work that is really several independent deliverables becomes several runs linked by root-level `dependsOnRuns` instead of one long story list.
+4. **Dependency audit** — the splitting agent does not get to sign off on its own graph. A *separate* agent, given only the source PRD and the finished `prd.json` and never the splitter's reasoning, re-derives every `dependsOn` edge and re-checks that the `Covers:` clauses tile `userNeed`. Its findings are applied (or rejected in writing) and the resolved graph is recorded in `deps-audit.json`. The point is the missing *verification* edge — a story scheduled before the thing that would let anyone observe it is done, which no amount of implementation effort inside that story can fix.
+5. **Run scaffolding** — it writes `ralph/runs/<run_id>/`:
 
 ```
 ralph/runs/<run_id>/

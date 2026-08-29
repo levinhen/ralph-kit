@@ -382,17 +382,21 @@ if [[ "$RUN_MODE" == "scoped" ]]; then
 fi
 
 # Catch a malformed backlog before any story state is derived from it: broken
-# ids, dangling or forward `dependsOn` edges, cycles, bad `dependsOnRuns`
-# references, and a missing or stale dependency audit all make the run's story
-# order meaningless. Lint the root-side PRD, not the worktree copy: they were
-# just synced, and only the root side can resolve `dependsOnRuns` references
-# against the live runs/ and archive/ dirs and find the run's deps-audit.json.
+# ids, dangling or forward `dependsOn` edges, cycles, and bad `dependsOnRuns`
+# references all make the run's story order meaningless. A missing or stale
+# dependency audit is only a `WARN:` line and does not stop the run. Lint the
+# root-side PRD, not the worktree copy: they were just synced, and only the root
+# side can resolve `dependsOnRuns` references against the live runs/ and
+# archive/ dirs.
 if ! PRD_LINT_OUTPUT="$(bash "$SCRIPT_DIR/lint-prd.sh" "$ROOT_PRD_FILE" 2>&1)"; then
   printf '%s\n' "$PRD_LINT_OUTPUT"
   echo "Error: Ralph PRD failed validation: $ROOT_PRD_FILE"
   echo "Fix the problems above, then rerun."
   exit 1
 fi
+
+# Advisory lint findings are swallowed by the capture above; surface them.
+printf '%s\n' "$PRD_LINT_OUTPUT" | grep '^WARN: ' || true
 
 initialize_ralph_story_state
 

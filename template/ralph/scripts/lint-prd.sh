@@ -1,7 +1,6 @@
 #!/bin/bash
-# Lint a Ralph prd.json: story ids, `dependsOn` edges between stories,
-# `dependsOnRuns` references to other runs, and the dependency audit that a
-# run-scoped PRD must carry beside it.
+# Lint a Ralph prd.json: story ids, `dependsOn` edges between stories, and
+# `dependsOnRuns` references to other runs.
 #
 # Usage:
 #   ./lint-prd.sh --run <run_id>       Lint ralph/runs/<run_id>/prd.json
@@ -9,7 +8,11 @@
 #   ./lint-prd.sh --all                Lint every ralph/runs/*/prd.json
 #
 # Env:
-#   RALPH_SKIP_DEPS_AUDIT=1            Skip the deps-audit.json requirement
+#   RALPH_REQUIRE_DEPS_AUDIT=1         Fail on a missing or stale deps-audit.json
+#   RALPH_SKIP_DEPS_AUDIT=1            Say nothing about deps-audit.json at all
+#
+# The dependency audit is advice, not a gate: a missing or stale deps-audit.json
+# prints `WARN:` and leaves the exit code alone.
 #
 # Prints `ERROR: <file>: <message>` once per problem and exits 1 if any file has
 # one; otherwise prints `OK: <file>` per linted file and exits 0.
@@ -56,7 +59,7 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     -h|--help)
-      sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//'
+      sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//'
       exit 0
       ;;
     -*)
@@ -273,6 +276,22 @@ report_error() {
   ERROR_COUNT=$((ERROR_COUNT + 1))
 }
 
+# Advisory findings print but do not touch the exit code, so a caller that gates
+# on the lint (ralph.sh, create-run.sh) still starts.
+report_warning() {
+  printf 'WARN: %s: %s\n' "$1" "$2"
+}
+
+# The dependency audit is the one advisory check. RALPH_REQUIRE_DEPS_AUDIT=1
+# promotes it back to a hard error for a project that wants the gate.
+report_deps_audit() {
+  if [[ "${RALPH_REQUIRE_DEPS_AUDIT:-0}" == "1" ]]; then
+    report_error "$1" "$2"
+  else
+    report_warning "$1" "$2"
+  fi
+}
+
 # `dependsOnRuns` names sibling runs, so the checks that touch the filesystem
 # need to know which ralph/ tree the file belongs to. Derive it from the path:
 # ralph/runs/<run_id>/prd.json gives both the run id and the root; a legacy
@@ -333,10 +352,12 @@ lint_depends_on_runs() {
   ' "$prd_file" 2>/dev/null || true)
 }
 
-# A run-scoped PRD must carry `deps-audit.json` beside it: the record of a
+# A run-scoped PRD may carry `deps-audit.json` beside it: the record of a
 # separate agent re-deriving the dependency edges and the `Covers:` coverage
-# from the source PRD alone. Legacy `ralph/prd.json` and bare paths have no run
-# directory to hold one, so they are exempt.
+# from the source PRD alone. It is a second opinion on the split, not a
+# precondition for running one, so everything here reports through
+# report_deps_audit and a project that never writes the file still lints clean.
+# Legacy `ralph/prd.json` and bare paths have no run directory to hold one.
 lint_deps_audit() {
   local prd_file="$1"
   local audit_file
@@ -353,23 +374,23 @@ lint_deps_audit() {
   audit_file="$(dirname "$prd_file")/deps-audit.json"
 
   if [[ ! -f "$audit_file" ]]; then
-    report_error "$prd_file" "no deps-audit.json beside it; a run-scoped PRD needs the dependency audit from ralph/scripts/DEPENDENCY_AUDIT.md before it can run (set RALPH_SKIP_DEPS_AUDIT=1 to bypass)"
+    report_deps_audit "$prd_file" "no deps-audit.json beside it; ralph/scripts/DEPENDENCY_AUDIT.md writes one if you want the split double-checked (set RALPH_SKIP_DEPS_AUDIT=1 to stop mentioning it)"
     return
   fi
 
   if ! jq -e . "$audit_file" >/dev/null 2>&1; then
-    report_error "$audit_file" "not valid JSON"
+    report_deps_audit "$audit_file" "not valid JSON"
     return
   fi
 
   if [[ "$(jq -r 'type' "$audit_file")" != "object" ]]; then
-    report_error "$audit_file" "top-level JSON value must be an object"
+    report_deps_audit "$audit_file" "top-level JSON value must be an object"
     return
   fi
 
   while IFS= read -r message; do
     [[ -n "$message" ]] || continue
-    report_error "$audit_file" "$message"
+    report_deps_audit "$audit_file" "$message"
   done < <(jq -r --arg runId "$LINT_RUN_ID" --slurpfile prd "$prd_file" "$DEPS_AUDIT_JQ" "$audit_file")
 }
 

@@ -89,7 +89,7 @@ consolidation 回合   沉淀运行学到的设计 → docs/design-ledger/
 1. **盘点在飞的 run** —— 和阶段 1 同一次盘点，但读法不同。在飞的 run 正是根级 `dependsOnRuns` 的来源：lint 能拒绝指向不存在的 run 的条目，却没办法发现一条你压根不知道要写的边。它同时挡住两件事——把别的 run 已经在做的切片重新拆一遍（两个分支改同一批文件，合并回来时撞车），以及把验收标准建立在只存在于未合并分支上的代码之上：本 run 的 worktree 是从基线分支切出来的，别的 run 里已经 `passes` 的故事在这里根本还不存在。
 2. **方案校验** —— 从 PRD 的引言里还原用户的真实诉求，审视 PRD 中隐含的实现方案；如果存在明显更优的做法，先停下来与你确认方向。
 3. **故事拆分** —— 从确认后的方案重新推导故事。第一铁律：**每个故事必须能在一个 agent 上下文窗口内完成**（"加一列字段 + 迁移"是合适的粒度，"做完整个看板"不是）。故事按依赖排序（schema → 后端 → UI），且每条真实依赖——构建依赖*和验证依赖*——都要显式写进故事的 `dependsOn`。每条验收标准都必须可机械验证（"typecheck 通过"可以，"工作正常"不行），**并且在本故事自己的回合内就能观察到**：一条要等后面的故事落地才能验证的标准，说明拆错的是故事而不是措辞。真正由多个独立可交付物组成的工作，应拆成多个 run、用根级 `dependsOnRuns` 连接，而不是堆成一条超长故事列表。
-4. **依赖审计** —— 拆解的 agent 无权为自己画的依赖图签字。由一个*独立的* agent 只拿到源 PRD 和成稿的 `prd.json`（拿不到拆解者的任何推理过程），重新推导每一条 `dependsOn` 边，并复核所有 `Covers:` 子句是否铺满 `userNeed`。它的发现要么被采纳、要么被书面驳回，最终图记录进 `deps-audit.json`。真正要抓的是漏掉的*验证依赖*——某个故事被排在"能让人观察到它"的东西之前，这种问题在故事内部再怎么努力实现也解决不了。
+4. **依赖审计**（可选） —— 拆解的 agent 无权为自己画的依赖图签字，所以可以由一个*独立的* agent 只拿到源 PRD 和成稿的 `prd.json`（拿不到拆解者的任何推理过程），重新推导每一条 `dependsOn` 边，并复核所有 `Covers:` 子句是否铺满 `userNeed`。它的发现要么被采纳、要么被书面驳回，最终图记录进 `deps-audit.json`。真正要抓的是漏掉的*验证依赖*——某个故事被排在"能让人观察到它"的东西之前，这种问题在故事内部再怎么努力实现也解决不了。它多花一次 agent 调用，也没有任何东西强制它：图值得找人复核就跑，backlog 短或者本来就是线性的就跳过。
 5. **run 脚手架** —— 写出 `ralph/runs/<run_id>/`：
 
 ```
@@ -97,7 +97,7 @@ ralph/runs/<run_id>/
 ├── prd.json                     # branchName、userNeed、userStories[]（passes:false）
 ├── progress.txt                 # 人类可读的进度日志
 ├── progress/shared-memory.json  # []——跨故事的模式/坑
-├── deps-audit.json              # 另一个 agent 对依赖图的独立复核结果
+├── deps-audit.json              # 可选：另一个 agent 对依赖图的独立复核结果
 └── state.json                   # runId、baseBranch、baseSha、targetBranch、status
 ```
 
@@ -110,7 +110,7 @@ ralph/runs/<run_id>/
 
 （已经有现成的 `prd.json`？用 `ralph/scripts/create-run.sh <run_id> path/to/prd.json` 可以生成同样的脚手架。）
 
-`ralph/scripts/lint-prd.sh --run <run_id>` 负责校验产物：悬空、前向、自引用或成环的 `dependsOn`，以及指向不存在 run 的 `dependsOnRuns`，都会被拒绝。它还要求 run 目录里有 `deps-audit.json`，并与 `prd.json` **逐边比对**——所以审计跑完之后再去改某条 `dependsOn`，只会让审计作废、必须重跑，而不会让它悄悄蒙混过关。`ralph.sh` 启动时也会跑同一个 lint，PRD 不过就拒绝启动。（`RALPH_SKIP_DEPS_AUDIT=1` 用于豁免审计机制引入之前建立的旧 run。）
+`ralph/scripts/lint-prd.sh --run <run_id>` 负责校验产物：悬空、前向、自引用或成环的 `dependsOn`，以及指向不存在 run 的 `dependsOnRuns`，都会被拒绝。run 目录里如果有 `deps-audit.json`，它会与 `prd.json` **逐边比对**——所以审计跑完之后再去改某条 `dependsOn`，只会让审计作废，而不会让它悄悄蒙混过关。但这项比对和"审计文件缺失"都只打印 `WARN:`、不影响退出码：审计是建议，不是关卡。`ralph.sh` 启动时也会跑同一个 lint，PRD 不过就拒绝启动。（`RALPH_REQUIRE_DEPS_AUDIT=1` 把审计警告重新升级为错误；`RALPH_SKIP_DEPS_AUDIT=1` 则完全不提它。）
 
 ### 阶段 3 —— 执行：`ralph.sh` 循环，每个故事一个全新 agent
 
@@ -140,7 +140,7 @@ ralph/scripts/ralph.sh --run <run_id> --tool claude 20   # 或 --tool codex（�
 5. 循环把故事状态同步回 `prd.json`（安全时 amend 进故事提交），并且**只认文件**。当前故事变为 `passes: true` 才正常进入下一故事；只要仍是 `passes != true`，无论 agent 口头上如何声明，都不会再重跑实现轮。
 6. 未完成的故事只会额外触发一次**故事疏通轮**（`UNBLOCK_STORY.md`）。它会拿到当前故事、近期进度、前后 Git HEAD、上一轮 agent 消息，以及可用时的原始失败事件——但它不是一次重试。在写任何代码之前，它先回答一个问题：这个故事是**真的被阻塞**了，还是上一轮只是没做完？
    - **没被阻塞**（默认答案，也是常见答案：预算耗尽、方向走错、测试留着没修、状态忘了写）——它从上一轮已提交的 checkpoint 接着做，把故事完成。循环正常前进。
-   - **真的被阻塞**——在这个故事自身的范围内，无论投入多少实现努力都不可能诚实满足它的验收标准：观察点落在后续故事里、故事根本没有可观测出口、验证设施要等后面的故事才建好、或者缺一条 `dependsOn` 边。这是切分缺陷，所以这一轮修的是切分：拆分故事、插入前置故事、重排顺序、补上缺失的边，或把某条验收标准搬到真正拥有该观察点的故事。它绝不允许削弱验收标准、丢掉 `userNeed` 的任何切片，或把任何故事标成通过。因为切分变了，它必须通过一个全新的隔离 agent 重跑依赖审计（`DEPENDENCY_AUDIT.md`）并重写 `deps-audit.json`，然后到此为止、不做实现。Ralph 按新切分继续循环。
+   - **真的被阻塞**——在这个故事自身的范围内，无论投入多少实现努力都不可能诚实满足它的验收标准：观察点落在后续故事里、故事根本没有可观测出口、验证设施要等后面的故事才建好、或者缺一条 `dependsOn` 边。这是切分缺陷，所以这一轮修的是切分：拆分故事、插入前置故事、重排顺序、补上缺失的边，或把某条验收标准搬到真正拥有该观察点的故事。它绝不允许削弱验收标准、丢掉 `userNeed` 的任何切片，或把任何故事标成通过。因为切分变了，已有的 `deps-audit.json` 就不再描述当前切分：这一轮要么通过一个全新的隔离 agent 重跑依赖审计（`DEPENDENCY_AUDIT.md`）并重写该文件，要么直接删掉它——绝不允许自己审自己的重构。然后到此为止、不做实现。Ralph 按新切分继续循环。
    - **两者都不是**——缺一个只有人能做的决定，或环境缺少任何轮次都造不出来的东西。Ralph 打印该轮的收尾消息后退出 `1`，后续轮次全部跳过。
 7. 只有成功的故事轮会继续，直到所有故事通过。循环没有总轮数预算：一个故事要么完成，要么被重构绕开，要么在第 6 步终止整次运行。重构是失败唯一能把控制权交回循环的路径，所以它自带上限（`RALPH_MAX_RESTRUCTURES`，默认 2）——反复需要修的切分是 PRD 的问题，该交给人。真正可能自我重试的是收尾轮，它们各自带一个小预算（见下方 `RALPH_MAX_*_ROUNDS`）。
 
@@ -246,7 +246,8 @@ ralph/scripts/orchestrate.sh --tool claude --plan "1 > 2,3 > 4"   # 手工阶段
 | `RALPH_NOTIFY` / `RALPH_NOTIFY_SOUND` | `1` | 桌面通知 |
 | `RALPH_PLAN` | — | `orchestrate.sh` 的默认计划 |
 | `RALPH_IGNORE_RUN_DEPS` | `0` | 设为 `1` 时，即使 `dependsOnRuns` 尚未 merge 回基线也照常启动 |
-| `RALPH_SKIP_DEPS_AUDIT` | `0` | 设为 `1` 时，lint run 级 PRD 不再要求配套的 `deps-audit.json` |
+| `RALPH_REQUIRE_DEPS_AUDIT` | `0` | 设为 `1` 时，把 `deps-audit.json` 的建议性警告重新升级为 lint 错误 |
+| `RALPH_SKIP_DEPS_AUDIT` | `0` | 设为 `1` 时，lint run 级 PRD 完全不提 `deps-audit.json` |
 | `RALPH_MAX_RESTRUCTURES` | `2` | 单次运行中疏通轮最多可以重塑待办列表几次，超过即停止 |
 
 退出码：`0` 全部完成，`1` 故事经疏通轮后仍失败/触顶重构次数上限/某个收尾轮用尽预算，`75` 命中限流，`124` 工具超时。

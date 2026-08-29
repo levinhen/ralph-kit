@@ -64,23 +64,28 @@ npm test
   `lint-prd.sh`, gated at `ralph.sh` startup, scheduled from by
   `orchestrate.sh` graph mode, described in both READMEs, rewritten by an
   unblock round that restructures a blocked story, and — for `dependsOn` —
-  mirrored edge for edge in each run's `deps-audit.json`. A semantic change to
-  either field must visit all seven, or the lint will accept what the scheduler
-  misreads (or vice versa).
-- **`dependsOn` is audited by a second agent, and the lint enforces that.**
-  `/ralph` must hand the finished split to a separate agent running
+  mirrored edge for edge in a run's `deps-audit.json` when it has one. A
+  semantic change to either field must visit all seven, or the lint will accept
+  what the scheduler misreads (or vice versa).
+- **The dependency audit is advice, and nothing may turn it back into a gate.**
+  `/ralph` may hand the finished split to a separate agent running
   `DEPENDENCY_AUDIT.md`, which re-derives the edges and the `Covers:` coverage
   from the source PRD alone; the resolved result lands in
-  `ralph/runs/<run_id>/deps-audit.json`. `lint-prd.sh` requires that file for a
-  run-scoped PRD and compares `storyOrder` and `edges` against `prd.json`, so an
-  edge edited afterwards invalidates the audit rather than outliving it. The
-  audit is deliberately not self-servable: the splitting agent is anchored on
-  its own shape and re-reading it produces agreement, not an audit. The same
-  rule binds the unblock round — restructuring a blocked story invalidates the
-  audit, so that round must re-run `DEPENDENCY_AUDIT.md` through a fresh
-  isolated agent and rewrite `deps-audit.json` before it finishes. Keep the
-  skill's `deps-audit.json` schema and the lint's checks in sync — the skill is
-  the only place an agent learns the shape the lint demands.
+  `ralph/runs/<run_id>/deps-audit.json`. That file is optional. `lint-prd.sh`
+  reports a missing or stale one through `report_deps_audit`, which prints
+  `WARN:` and leaves `ERROR_COUNT` alone, so neither `ralph.sh` nor
+  `create-run.sh` refuses to start over it — only `RALPH_REQUIRE_DEPS_AUDIT=1`
+  restores the old error. Adding a new blocking check here re-breaks the thing
+  this repo is: a decision aid, not a compliance regime.
+  What stays absolute is that the audit is not self-servable: the splitting
+  agent is anchored on its own shape and re-reading it produces agreement, not
+  an audit. So the choice is always audit-by-another-agent or no audit — never
+  a `deps-audit.json` written by the agent that wrote the split. The same rule
+  binds the unblock round: restructuring a blocked story invalidates an existing
+  audit, so that round re-runs `DEPENDENCY_AUDIT.md` through a fresh isolated
+  agent or deletes the stale file. Keep the skill's `deps-audit.json` schema and
+  the lint's checks in sync — the skill is the only place an agent learns the
+  shape the lint compares against.
 - **The failure path is described in four places.** Story failure runs exactly
   one round (`UNBLOCK_STORY.md`), which decides whether the story is genuinely
   blocked or was merely unfinished: unfinished means it gets completed there,

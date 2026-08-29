@@ -41,9 +41,9 @@ Also initialize these companion files for a new run:
 - `ralph/runs/<run_id>/progress.txt` with a Ralph progress header
 - `ralph/runs/<run_id>/progress/shared-memory.json` initialized to `[]` (cross-story patterns/gotchas)
 - `ralph/runs/<run_id>/state.json` with `runId`, `baseBranch`, `baseSha`, `targetBranch`, and `status: "ready"`
-- `ralph/runs/<run_id>/deps-audit.json` written **after** a separate agent audits the split — see
+- `ralph/runs/<run_id>/deps-audit.json` — optional, written **after** a separate agent audits the split — see
   [Dependency Audit: A Separate Agent Re-derives the Edges](#dependency-audit-a-separate-agent-re-derives-the-edges).
-  The lint refuses a run-scoped PRD that has no matching audit beside it, so the run cannot start without one.
+  The lint reports a missing or stale audit as a `WARN:` line; the run starts either way.
 
 Per-story progress records are appended to `ralph/runs/<run_id>/progress/<story_id>.jsonl` (one JSON object per
 line, append-only) by `append-progress-json.sh` at iteration time. Do not pre-create those `.jsonl` files. Do not
@@ -64,7 +64,7 @@ After writing the run files, always lint the PRD and fix everything it reports b
 bash ralph/scripts/lint-prd.sh --run <run_id>
 ```
 
-The lint rejects dangling, forward, self, and cyclic `dependsOn` references, `dependsOnRuns` entries that point at runs which do not exist, and a `deps-audit.json` that is missing or no longer matches the split it audited. `ralph.sh` runs the same lint at startup and refuses to start on a failing PRD.
+The lint rejects dangling, forward, self, and cyclic `dependsOn` references and `dependsOnRuns` entries that point at runs which do not exist. A `deps-audit.json` that is missing or no longer matches the split it audited is reported as a `WARN:` line and does not fail the lint (`RALPH_REQUIRE_DEPS_AUDIT=1` turns that back into an error, `RALPH_SKIP_DEPS_AUDIT=1` silences it). `ralph.sh` runs the same lint at startup and refuses to start on a failing PRD.
 
 ---
 
@@ -363,10 +363,14 @@ one from the future.
 
 ## Dependency Audit: A Separate Agent Re-derives the Edges
 
-**This step is mandatory and you may not perform it yourself.** Once the split is written, a *different* agent — a
-fresh context that has not seen your reasoning — re-derives every `dependsOn` edge and checks the `Covers:` coverage
-from the source PRD and `prd.json` alone. Only after its findings are resolved does the run get its
-`deps-audit.json`, and `lint-prd.sh` refuses a run-scoped PRD without a matching one.
+**Recommended for a multi-story split, and you may never perform it yourself.** Once the split is written, a
+*different* agent — a fresh context that has not seen your reasoning — re-derives every `dependsOn` edge and checks the
+`Covers:` coverage from the source PRD and `prd.json` alone. Only after its findings are resolved does the run get its
+`deps-audit.json`.
+
+It is a second opinion, not a gate: `lint-prd.sh` warns about a missing or stale audit but still passes, and `ralph.sh`
+still starts. Spend the extra agent call when the graph is worth checking — several stories, real edges between them,
+a split you are not sure of. Skip it for a short or linear backlog, and say plainly that you skipped it.
 
 **Why it cannot be you.** By the time you reach `dependsOn` you have already committed to a shape. A missed
 verification edge is invisible from inside that shape: you know why US-003 comes after US-002, so "US-003 depends on
@@ -396,8 +400,9 @@ pi -p "$(cat ralph/scripts/DEPENDENCY_AUDIT.md)  Source PRD: ralph/tasks/prd-<fe
 "I split it this way because…". Every sentence of yours that reaches the auditor moves its answer toward yours, which
 is the one thing the audit is supposed to be independent of. The three inputs above are the whole brief.
 
-Unlike browser verification, this has no `unavailable` fallback: the lint blocks the run either way, so if no
-isolation mechanism works, say so to the user and stop rather than auditing your own split.
+If no isolation mechanism works, skip the audit, tell the user the split went unaudited, and hand the run over anyway.
+Never re-read your own split and write a `deps-audit.json` from it: an audit you performed yourself is worse than no
+audit, because the file then claims a second opinion that never happened.
 
 ### Resolving the findings
 
@@ -447,9 +452,9 @@ Write `ralph/runs/<run_id>/deps-audit.json`:
 
 - **`runId`** must match the run directory name.
 - **`storyOrder`** lists every story id in `prd.json` order.
-- **`edges`** repeats every story's final `dependsOn`. The lint compares it against `prd.json` **edge for edge**, so
-  copying it is a last read-through of the graph — and any later change to a `dependsOn` invalidates the audit instead
-  of silently outliving it.
+- **`edges`** repeats every story's final `dependsOn`. The lint compares it against `prd.json` **edge for edge** and
+  warns on a disagreement, so copying it is a last read-through of the graph — and any later change to a `dependsOn`
+  invalidates the audit instead of silently outliving it.
 - **`coverage`** must be `"complete"`. A gap or an overlap means the split still needs fixing: fix it, re-run the
   audit, then record the resolved findings.
 - **`findings`** records every finding the auditor raised, with `kind` (one of the four above), optional `storyId`,
@@ -488,9 +493,10 @@ started with.
     linear chain.
 11. **dependsOnRuns**: At the root, list the run ids this run needs merged back first — including any run the
     Step 0 sweep turned up whose code this run builds on or needs to verify itself; `[]` when independent.
-12. **Dependency audit**: a separate agent re-derives the edges and the `Covers:` coverage per
+12. **Dependency audit** (recommended for a multi-story graph, not required): a separate agent re-derives the edges
+    and the `Covers:` coverage per
     [Dependency Audit](#dependency-audit-a-separate-agent-re-derives-the-edges); its resolved findings and the final
-    graph go into `ralph/runs/<run_id>/deps-audit.json`. Never audit your own split.
+    graph go into `ralph/runs/<run_id>/deps-audit.json`. Never audit your own split — skip it and say so instead.
 13. **Lint before handoff**: `bash ralph/scripts/lint-prd.sh --run <run_id>` must pass; fix reported errors by fixing
     the split, not by deleting the dependency fields.
 
@@ -710,7 +716,7 @@ Before writing run-scoped `prd.json`, verify:
 - [ ] No story depends on a later story
 - [ ] Verification closure dry-run done: every criterion is observable in its own story's round
 - [ ] `dependsOn` records the real build and verification edges (no fabricated linear chain)
-- [ ] A separate agent ran the dependency audit; every finding is applied or rejected with a written reason
-- [ ] `deps-audit.json` is written and agrees with `prd.json` edge for edge
+- [ ] Dependency audit: either a separate agent ran it — every finding applied or rejected with a written reason, and
+      `deps-audit.json` agreeing with `prd.json` edge for edge — or it was skipped and the user was told
 - [ ] Considered splitting into multiple runs; run-level edges — to new runs and to in-flight ones — are declared in `dependsOnRuns`
 - [ ] `bash ralph/scripts/lint-prd.sh --run <run_id>` reports OK

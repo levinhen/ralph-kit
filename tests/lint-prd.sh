@@ -1,11 +1,12 @@
 #!/bin/bash
 #
 # lint-prd.sh pins the shape of a run backlog: unique story ids, `dependsOn`
-# edges that point backwards at real stories, no cycles, `dependsOnRuns`
-# entries naming runs that exist, and a deps-audit.json that still describes the
-# split beside it. ralph.sh lints the active PRD at startup and, for a scoped
-# run, additionally refuses to start while a run it depends on has not landed on
-# the base branch.
+# edges that point backwards at real stories, no cycles, and `dependsOnRuns`
+# entries naming runs that exist. A deps-audit.json that is missing or no longer
+# describes the split is advisory — it prints WARN and the lint still passes,
+# unless RALPH_REQUIRE_DEPS_AUDIT=1 asks for the gate. ralph.sh lints the active
+# PRD at startup and, for a scoped run, additionally refuses to start while a
+# run it depends on has not landed on the base branch.
 
 set -e
 
@@ -71,6 +72,34 @@ expect_lint_error() {
 
   if ! printf '%s\n' "$LINT_OUTPUT" | grep -q "$pattern"; then
     echo "$label: expected an error matching '$pattern'" >&2
+    printf '%s\n' "$LINT_OUTPUT" >&2
+    exit 1
+  fi
+}
+
+# The dependency audit reports through WARN: the finding is printed and the
+# lint still exits 0, so nothing gating on it is blocked.
+expect_lint_warning() {
+  local label="$1"
+  local pattern="$2"
+  shift 2
+
+  run_lint "$@"
+
+  if [[ "$LINT_STATUS" -ne 0 ]]; then
+    echo "$label: expected the lint to pass with a warning, got exit $LINT_STATUS" >&2
+    printf '%s\n' "$LINT_OUTPUT" >&2
+    exit 1
+  fi
+
+  if ! printf '%s\n' "$LINT_OUTPUT" | grep -q '^WARN: '; then
+    echo "$label: expected a WARN line" >&2
+    printf '%s\n' "$LINT_OUTPUT" >&2
+    exit 1
+  fi
+
+  if ! printf '%s\n' "$LINT_OUTPUT" | grep -q "$pattern"; then
+    echo "$label: expected a warning matching '$pattern'" >&2
     printf '%s\n' "$LINT_OUTPUT" >&2
     exit 1
   fi
@@ -211,9 +240,9 @@ rm -rf "$RALPH_ROOT/runs/needs-missing" "$RALPH_ROOT/runs/needs-archived" \
 
 # --- Dependency audit ---------------------------------------------------------
 
-# A run-scoped PRD carries deps-audit.json: the record of a separate agent
-# re-deriving the edges. Without it, or once it stops describing the split it
-# audited, the run must not start.
+# A run-scoped PRD may carry deps-audit.json: the record of a separate agent
+# re-deriving the edges. It is a second opinion, not a precondition — a missing
+# or stale one is reported and the run still starts.
 
 audit_run_prd() {
   local run_id="$1"
@@ -239,15 +268,26 @@ audit_run_prd "audited" '[
   {"id": "US-002", "title": "Badge", "dependsOn": ["US-001"], "passes": false}
 ]'
 
-expect_lint_error "missing deps audit" \
+expect_lint_warning "missing deps audit" \
   "no deps-audit.json beside it" --run audited
 
-# The gate exists for runs written after the audit landed; older runs opt out.
 # Set and unset explicitly: a `VAR=1 func` prefix on a shell function has
-# unspecified scope, and a leak would silently disable every case below.
+# unspecified scope, and a leak would silently change every case below.
 export RALPH_SKIP_DEPS_AUDIT=1
-expect_lint_ok "deps audit bypass" --run audited
+run_lint --run audited
+if printf '%s\n' "$LINT_OUTPUT" | grep -q 'deps-audit'; then
+  echo "deps audit silenced: expected no mention of the audit at all" >&2
+  printf '%s\n' "$LINT_OUTPUT" >&2
+  exit 1
+fi
+expect_lint_ok "deps audit silenced" --run audited
 unset RALPH_SKIP_DEPS_AUDIT
+
+# A project that wants the old gate back asks for it.
+export RALPH_REQUIRE_DEPS_AUDIT=1
+expect_lint_error "missing deps audit under RALPH_REQUIRE_DEPS_AUDIT" \
+  "no deps-audit.json beside it" --run audited
+unset RALPH_REQUIRE_DEPS_AUDIT
 
 audit_json <<'JSON'
 {
@@ -276,7 +316,7 @@ audit_json <<'JSON'
   "findings": []
 }
 JSON
-expect_lint_error "audit run id mismatch" \
+expect_lint_warning "audit run id mismatch" \
   "does not match the run directory 'audited'" --run audited
 
 # The edge comparison is what makes the audit outlive nothing: editing a
@@ -290,7 +330,7 @@ audit_json <<'JSON'
   "findings": []
 }
 JSON
-expect_lint_error "audit disagrees on an edge" \
+expect_lint_warning "audit disagrees on an edge" \
   "edges\['US-002'\] is \[\] but prd.json's dependsOn is \[\"US-001\"\]" --run audited
 
 audit_json <<'JSON'
@@ -302,7 +342,7 @@ audit_json <<'JSON'
   "findings": []
 }
 JSON
-expect_lint_error "audit predates a story" \
+expect_lint_warning "audit predates a story" \
   "does not match prd.json's story order" --run audited
 
 audit_json <<'JSON'
@@ -314,7 +354,7 @@ audit_json <<'JSON'
   "findings": []
 }
 JSON
-expect_lint_error "audit reports an unresolved coverage gap" \
+expect_lint_warning "audit reports an unresolved coverage gap" \
   'coverage is "gaps"; it must be "complete"' --run audited
 
 audit_json <<'JSON'
@@ -326,7 +366,7 @@ audit_json <<'JSON'
   "findings": [{"kind": "missing-edge", "storyId": "US-002", "detail": "Needs the column."}]
 }
 JSON
-expect_lint_error "audit finding without a resolution" \
+expect_lint_warning "audit finding without a resolution" \
   'needs a resolution of "applied" or "rejected: <reason>"' --run audited
 
 audit_json <<'JSON'
@@ -338,7 +378,7 @@ audit_json <<'JSON'
   "findings": [{"kind": "looks-off", "detail": "Something.", "resolution": "applied"}]
 }
 JSON
-expect_lint_error "audit finding with an unknown kind" \
+expect_lint_warning "audit finding with an unknown kind" \
   'has kind "looks-off"' --run audited
 
 # A legacy ralph/prd.json has no run directory to hold an audit, so it is exempt

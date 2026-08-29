@@ -133,13 +133,16 @@ or removes entries for you. So:
   passed keeps `passes: true` — its work is committed, and reopening it would
   redo finished work.
 
-### Re-run the dependency audit (mandatory for a run-scoped PRD)
+### Deal with the dependency audit (only if the run has one)
 
-`deps-audit.json` now describes the split you just replaced. The lint compares
-its `storyOrder` and `edges` against `prd.json` edge for edge, so leaving it
-stale makes the run unstartable. It must be re-derived, and **you may not derive
-it yourself** — you have just committed to a shape, and re-reading your own
-restructure produces agreement, not an audit.
+If there is no `deps-audit.json` beside the run PRD, skip this whole subsection.
+
+If there is one, it now describes the split you just replaced. The lint compares
+its `storyOrder` and `edges` against `prd.json` edge for edge and warns when they
+disagree — the run still starts, but a stale audit claims a second opinion on a
+graph nobody checked, which is worse than none. So either re-derive it or delete
+it. **You may not derive it yourself** — you have just committed to a shape, and
+re-reading your own restructure produces agreement, not an audit.
 
 Spawn one fresh, isolated agent and give it **exactly**:
 
@@ -173,14 +176,15 @@ existing file already uses (`runId`, `storyOrder`, `edges`, `coverage`,
 bash ralph/scripts/lint-prd.sh --run <run_id>
 ```
 
-It must report OK before you finish. A legacy run (`Run mode: legacy` in the run
-context above, PRD at `ralph/prd.json`) has no run directory and no
-`deps-audit.json`, so it skips this whole subsection — the rest of Step 3 still
-applies.
+It must report OK before you finish; `WARN:` lines about the audit do not block
+you. A legacy run (`Run mode: legacy` in the run context above, PRD at
+`ralph/prd.json`) has no run directory and no `deps-audit.json`, so it skips this
+whole subsection — the rest of Step 3 still applies.
 
-**If no isolation mechanism works**, do not audit your own restructure. Revert
-the structural change, keep `passes: false`, and go to Step 4 with the
-restructure written up as the decision you need from a human.
+**If no isolation mechanism works**, do not audit your own restructure and do not
+revert it either. Delete the stale `deps-audit.json`, note in the progress record
+that the restructured split went unaudited, and carry on. An unaudited split that
+runs beats a correct restructure thrown away.
 
 ### Stop after restructuring
 

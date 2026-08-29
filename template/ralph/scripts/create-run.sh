@@ -2,11 +2,9 @@
 # Create a run-scoped Ralph directory from an existing prd.json.
 # Usage: ./create-run.sh [--force] <run_id> [source_prd_json]
 #
-# The closing lint requires a deps-audit.json in the new run dir, so a run
-# created from a hand-written prd.json fails that lint until the dependency
-# audit (DEPENDENCY_AUDIT.md) has run. The run dir is left in place when the
-# lint fails: write the audit beside the copied prd.json and re-lint, or set
-# RALPH_SKIP_DEPS_AUDIT=1 for a run that predates the audit.
+# The closing lint checks the backlog's shape: story ids and the `dependsOn` /
+# `dependsOnRuns` edges. A missing deps-audit.json is only a `WARN:` line, so a
+# run created from a hand-written prd.json is ready to run without one.
 
 set -e
 
@@ -138,5 +136,8 @@ if ! LINT_OUTPUT="$(bash "$SCRIPT_DIR/lint-prd.sh" --run "$RUN_ID" 2>&1)"; then
   echo "Fix it, then recheck with: $SCRIPT_DIR/lint-prd.sh --run $RUN_ID"
   exit 1
 fi
+
+# Advisory lint findings are swallowed by the capture above; surface them.
+printf '%s\n' "$LINT_OUTPUT" | grep '^WARN: ' || true
 
 echo "Run with: $SCRIPT_DIR/ralph.sh --run $RUN_ID"

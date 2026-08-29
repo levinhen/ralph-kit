@@ -1,8 +1,8 @@
 #!/bin/bash
 #
 # Ralph used to run a fixed max_iterations budget (default 10) that every round
-# drew from - stories and wrap-up rounds alike. With failed stories now ending
-# the run through the diagnosis round, that budget only ever capped how many
+# drew from - stories and wrap-up rounds alike. With failed stories now going
+# through the unblock round instead, that budget only ever capped how many
 # stories a run could finish. This test pins the replacement behaviour: a
 # backlog larger than the old default runs to completion.
 

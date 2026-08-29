@@ -50,7 +50,9 @@ ralph/runs/<run_id>/prd.json          机器可读的运行定义
         │    3. 启动全新的 claude / codex / pi 进程
         │    4. agent：实现 → 质量检查 → passes=true → 提交
         │    5. 把故事状态同步回 prd.json
-        │       passes!=true → 只读失败诊断轮 → 输出终端 → 停止
+        │       passes!=true → 疏通轮：真被阻塞？ → 重构 PRD → 循环继续
+        │                            没被阻塞？   → 做完故事 → 循环继续
+        │                            都不是？     → 输出终端 → 停止
         ▼
 所有故事 passes=true
         │
@@ -132,8 +134,11 @@ ralph/scripts/ralph.sh --run <run_id> --tool claude 20   # 或 --tool codex（�
 4. agent 按手册行事：只实现**这一个故事**（只做 `Covers:` 指明的那一块），跑项目的质量检查（typecheck/lint/测试），把故事文件改为 `passes: true` 并写下 `notes`，用 `append-progress-json.sh` 追加结构化进度记录（一行 JSON 写进 `progress/<story_id>.jsonl`，可选 `--shared-memory` 沉淀可复用模式），最后以 `feat: [US-xxx] - [标题]` 提交全部变更。
    每个 agent 回合都会收到统一的 **Round Commit Contract**：本轮产生的所有预期仓库产物必须在本轮结束前提交，不能留给后续 story、finalization、merge-back 或 consolidation 代为提交；若只形成了安全且完整的阶段性成果，则提交 checkpoint，但仍保持故事未完成。运行时 marker、临时诊断文件和无产物的幂等重试不要求空提交。
 5. 循环把故事状态同步回 `prd.json`（安全时 amend 进故事提交），并且**只认文件**。当前故事变为 `passes: true` 才正常进入下一故事；只要仍是 `passes != true`，无论 agent 口头上如何声明，都不会再重跑实现轮。
-6. 未完成的故事只会额外触发一次专门的**失败诊断轮**（`DIAGNOSE_FAILURE.md`）。它会拿到当前故事、近期进度、前后 Git HEAD、上一轮 agent 消息，以及可用时的原始失败事件；诊断 agent 以只读权限运行，产出结构化的根因报告。该报告随即喂给恰好一次**升级修复轮**（`RECOVER_STORY.md`）：一个全新的、有写权限的 agent，以更高的推理预算启动（`RALPH_*_RECOVERY_ARGS`；codex 默认注入 `-c model_reasoning_effort=xhigh`），从诊断结论出发做本故事的最后一次自动尝试。修复后故事通过，循环正常前进；仍不通过，Ralph 会把诊断报告和修复轮的收尾消息一并打印，然后退出 `1`，后续轮次全部跳过。
-7. 只有成功的故事轮会继续，直到所有故事通过。循环没有总轮数预算：连修复轮都救不回来的故事会在第 6 步终止整次运行，所以故事循环只会沿着待办列表单向前进。真正可能自我重试的是收尾轮，它们各自带一个小预算（见下方 `RALPH_MAX_*_ROUNDS`）。
+6. 未完成的故事只会额外触发一次**故事疏通轮**（`UNBLOCK_STORY.md`）。它会拿到当前故事、近期进度、前后 Git HEAD、上一轮 agent 消息，以及可用时的原始失败事件——但它不是一次重试。在写任何代码之前，它先回答一个问题：这个故事是**真的被阻塞**了，还是上一轮只是没做完？
+   - **没被阻塞**（默认答案，也是常见答案：预算耗尽、方向走错、测试留着没修、状态忘了写）——它从上一轮已提交的 checkpoint 接着做，把故事完成。循环正常前进。
+   - **真的被阻塞**——在这个故事自身的范围内，无论投入多少实现努力都不可能诚实满足它的验收标准：观察点落在后续故事里、故事根本没有可观测出口、验证设施要等后面的故事才建好、或者缺一条 `dependsOn` 边。这是切分缺陷，所以这一轮修的是切分：拆分故事、插入前置故事、重排顺序、补上缺失的边，或把某条验收标准搬到真正拥有该观察点的故事。它绝不允许削弱验收标准、丢掉 `userNeed` 的任何切片，或把任何故事标成通过。因为切分变了，它必须通过一个全新的隔离 agent 重跑依赖审计（`DEPENDENCY_AUDIT.md`）并重写 `deps-audit.json`，然后到此为止、不做实现。Ralph 按新切分继续循环。
+   - **两者都不是**——缺一个只有人能做的决定，或环境缺少任何轮次都造不出来的东西。Ralph 打印该轮的收尾消息后退出 `1`，后续轮次全部跳过。
+7. 只有成功的故事轮会继续，直到所有故事通过。循环没有总轮数预算：一个故事要么完成，要么被重构绕开，要么在第 6 步终止整次运行。重构是失败唯一能把控制权交回循环的路径，所以它自带上限（`RALPH_MAX_RESTRUCTURES`，默认 2）——反复需要修的切分是 PRD 的问题，该交给人。真正可能自我重试的是收尾轮，它们各自带一个小预算（见下方 `RALPH_MAX_*_ROUNDS`）。
 
 交互式终端的最底部会常驻一条进度栏，上方的 agent 日志照常滚动：
 
@@ -170,9 +175,9 @@ Ralph usage for this run:
 - **codex** 只报 token 不报金额，因此 Ralph 按价格表估算。默认值为 gpt-5.6-sol 标准档（每百万 token：输入 $5、缓存命中 $0.50、缓存写入 $6.25、输出 $30）；换模型时请自行覆盖。输入超过 272K 的请求走更贵的长上下文档，而事件流并不逐请求暴露这一点，因此长期处于该档的 run 会被低估，除非你调高上述价格。
 - **pi** 按自带的模型价目表逐条消息计价并上报结果，因此 Ralph 直接采用该金额和它给出的真实模型名——无论 pi 配置的是哪个 provider / 模型。pi 的 run 完全忽略 `RALPH_PRICE_*`。
 
-防护措施：单次调用的空闲超时（默认静默 360 秒即终止）和可选的硬超时；命中限流时以专用退出码 75 中止整个循环；每次调用后清扫进程树，回收残留的 dev server / watcher（含 Windows Git Bash 的特殊处理）。Codex 使用 `--json`、pi 使用 `--mode json`，两者都保留各自的正常 session：Ralph 直接从管道实时解析 JSONL，只在内存环形缓冲中保留最近 100 条事件；仅当本次调用失败时，才把这些原始事件写入临时诊断文件。最后的诊断轮可以读取该文件，但不能改仓库（Codex 使用 `--sandbox read-only`，Claude 使用 plan 权限模式）。
+防护措施：单次调用的空闲超时（默认静默 360 秒即终止）和可选的硬超时；命中限流时以专用退出码 75 中止整个循环；每次调用后清扫进程树，回收残留的 dev server / watcher（含 Windows Git Bash 的特殊处理）。Codex 使用 `--json`、pi 使用 `--mode json`，两者都保留各自的正常 session：Ralph 直接从管道实时解析 JSONL，只在内存环形缓冲中保留最近 100 条事件；仅当本次调用失败时，才把这些原始事件写入临时诊断文件。疏通轮会被指向该文件，可在判断发生了什么时读取它。
 
-pi 的诊断轮防护更弱，这是明知的取舍：pi 自身不提供沙箱，因此 Ralph 只能用手上可控的两件事来约束这一轮——`--exclude-tools edit,write` 摘掉写文件的工具，`--no-approve` 阻止加载项目本地的 pi 扩展。`bash` 必须保留（诊断轮要读 Git 状态），所以「不写文件」这条在 pi 上靠的是 `DIAGNOSE_FAILURE.md` 的约定，而非强制边界。实现轮则以 `pi --approve` 运行，会信任项目本地的 `.pi/` 设置、扩展与技能。
+每一轮都是写权限轮——故事轮做实现，收尾轮做定稿与合并，疏通轮要么完成故事要么重塑待办列表——因此全部绕过权限确认运行（`claude --dangerously-skip-permissions`、`codex --dangerously-bypass-approvals-and-sandbox`、`pi --approve`，后者会信任项目本地的 `.pi/` 设置、扩展与技能）。
 
 ### 阶段 4 —— merge-back：分支合并回基线
 
@@ -238,10 +243,9 @@ ralph/scripts/orchestrate.sh --tool claude --plan "1 > 2,3 > 4"   # 手工阶段
 | `RALPH_PLAN` | — | `orchestrate.sh` 的默认计划 |
 | `RALPH_IGNORE_RUN_DEPS` | `0` | 设为 `1` 时，即使 `dependsOnRuns` 尚未 merge 回基线也照常启动 |
 | `RALPH_SKIP_DEPS_AUDIT` | `0` | 设为 `1` 时，lint run 级 PRD 不再要求配套的 `deps-audit.json` |
-| `RALPH_CODEX_RECOVERY_ARGS` | `-c model_reasoning_effort=xhigh` | 升级修复轮附加给 codex 的额外参数 |
-| `RALPH_CLAUDE_RECOVERY_ARGS` / `RALPH_PI_RECOVERY_ARGS` | — | 升级修复轮附加给 claude / pi 的额外参数 |
+| `RALPH_MAX_RESTRUCTURES` | `2` | 单次运行中疏通轮最多可以重塑待办列表几次，超过即停止 |
 
-退出码：`0` 全部完成，`1` 故事经诊断与修复后仍失败/某个收尾轮用尽预算，`75` 命中限流，`124` 工具超时。
+退出码：`0` 全部完成，`1` 故事经疏通轮后仍失败/触顶重构次数上限/某个收尾轮用尽预算，`75` 命中限流，`124` 工具超时。
 
 ## 安装
 

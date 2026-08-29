@@ -20,6 +20,10 @@ Converts existing PRDs to the prd.json format that Ralph uses for autonomous exe
 Take a PRD (markdown file or text) and convert it to a run-scoped `prd.json` under
 `ralph/runs/<run_id>/prd.json`.
 
+**Start by sweeping the work that is still in flight** — see
+[Sweep the Runs Still in Flight](#step-0-sweep-the-runs-still-in-flight) below. That sweep is where `dependsOnRuns`
+comes from, and it is the only thing standing between you and re-splitting work another run is already executing.
+
 **This is not a mechanical transcription.** Before splitting the PRD into stories, validate that the approach baked into
 the PRD actually fits the user's need — see [Validate the Approach Before Splitting Stories](#validate-the-approach-before-splitting-stories)
 below. Only after the approach is sound (or corrected) do you split it into user stories.
@@ -61,6 +65,55 @@ bash ralph/scripts/lint-prd.sh --run <run_id>
 ```
 
 The lint rejects dangling, forward, self, and cyclic `dependsOn` references, `dependsOnRuns` entries that point at runs which do not exist, and a `deps-audit.json` that is missing or no longer matches the split it audited. `ralph.sh` runs the same lint at startup and refuses to start on a failing PRD.
+
+---
+
+## Step 0: Sweep the Runs Still in Flight
+
+**Do this first, every time, without being asked to.** Two things depend on it that nothing downstream can recover:
+this run's `dependsOnRuns`, and whether you are about to re-split work another run is already executing.
+
+You do not have to judge what counts as unfinished. A run and its source PRD move into
+`ralph/archive/<date>-<run_id>/` only once that run is finished and consolidated, so **whatever is still sitting in
+`ralph/tasks/` or `ralph/runs/` is in flight by definition**:
+
+```bash
+ls ralph/tasks/prd-*.md 2>/dev/null       # PRDs written, not yet finished
+ls ralph/prd.json 2>/dev/null             # a legacy-mode run, if this project has one
+for d in ralph/runs/*/; do
+  [ -f "$d/prd.json" ] || continue
+  printf '%s ' "$d"
+  jq -r '"\(.userStories | map(select(.passes == true)) | length)/\(.userStories | length) stories passing"' "$d/prd.json"
+done
+```
+
+For any run that looks like it overlaps the PRD in front of you, read its stories rather than just its counts:
+
+```bash
+jq -r '.userNeed, (.userStories[] | "\(.id) passes=\(.passes) \(.title) — \(.description)")' ralph/runs/<x>/prd.json
+```
+
+**Report what you found before you split anything** — each in-flight PRD or run, how far it has got, and an explicit
+note on any overlap with the PRD you are converting. An empty sweep is a one-line report, not silence.
+
+Then let the sweep drive three decisions:
+
+1. **`dependsOnRuns` comes from here.** An in-flight run whose code this run builds on — or whose output this run
+   needs in order to verify its own stories — belongs in this run's root-level `dependsOnRuns`. The sweep is the only
+   place you learn which runs exist to name, and the lint cannot cover for you: it rejects a `dependsOnRuns` entry
+   pointing at a run that does not exist, but it has no way to notice an edge you never knew to write.
+2. **Do not re-split work another run already owns.** If an in-flight run holds a slice of what this PRD describes,
+   that slice does not get stories here. Two runs implementing one slice means two branches editing the same files and
+   a merge-back collision. Either drop the slice from this run — naming the run that owns it, and adding the
+   `dependsOnRuns` edge if you need its result — or, when this PRD deliberately supersedes that design, say so to the
+   user and carry *changing* the other run's code as this run's own stories.
+3. **A passing story is code, and not code this run can see yet.** A story marked `passes: true` in another run is
+   code on **that run's branch**. This run's worktree is cut from the base branch, so until that run merges back its
+   code does not exist here at all. A story whose criteria assume code from an unmerged run cannot be built *or*
+   observed — that is precisely a `dependsOnRuns` edge, and it is a verification dependency as much as a build one.
+
+Whether the PRD in front of you already has a run of its own is a separate check with its own rules — see
+[Run Directory Handling](#run-directory-handling).
 
 ---
 
@@ -350,8 +403,9 @@ The auditor reports `missing-edge` / `spurious-edge` / `coverage-gap` / `coverag
 every one:
 
 - **`missing-edge`** — the auditor derived an edge you did not write. Default to **applying** it. This is the finding
-  that actually breaks runs: a story starts before what it needs exists, fails, and burns the diagnosis and recovery
-  rounds on a scheduling problem no amount of implementation effort can fix.
+  that actually breaks runs: a story starts before what it needs exists and fails, and the unblock round then has to
+  re-derive the edge you skipped and restructure the split mid-run — the same auditing work, done under worse
+  conditions than you have here.
 - **`spurious-edge`** — the auditor could not justify an edge you wrote. Either remove it or state the justification
   the auditor lacked. A fake edge is not harmless: it serializes work that could have run in parallel and it buries
   the real edges among invented ones.
@@ -402,6 +456,11 @@ Write `ralph/runs/<run_id>/deps-audit.json`:
 
 Then re-run `bash ralph/scripts/lint-prd.sh --run <run_id>` and fix anything it reports.
 
+A story unblock round can rewrite this file. When a story turns out to be genuinely blocked — its acceptance criteria
+cannot be satisfied from inside it — that round restructures the split and re-runs the audit against the new shape,
+exactly the way you ran it here. The file always describes the split that is currently executing, never the one the run
+started with.
+
 > `RALPH_SKIP_DEPS_AUDIT=1` bypasses the check. It exists for runs created before the audit was introduced. Do not
 > reach for it to get past a lint error on a run you just wrote — that is the case the gate is for.
 
@@ -425,7 +484,8 @@ Then re-run `bash ralph/scripts/lint-prd.sh --run <run_id>` and fix anything it 
 10. **dependsOn**: Every story lists its real build **and verification** dependencies by story id. Dependencies may
     only point at earlier array entries. Omit or leave `[]` for genuinely independent stories — do not fabricate a
     linear chain.
-11. **dependsOnRuns**: At the root, list the run ids this run needs merged back first; `[]` when independent.
+11. **dependsOnRuns**: At the root, list the run ids this run needs merged back first — including any run the
+    Step 0 sweep turned up whose code this run builds on or needs to verify itself; `[]` when independent.
 12. **Dependency audit**: a separate agent re-derives the edges and the `Covers:` coverage per
     [Dependency Audit](#dependency-audit-a-separate-agent-re-derives-the-edges); its resolved findings and the final
     graph go into `ralph/runs/<run_id>/deps-audit.json`. Never audit your own split.
@@ -619,12 +679,20 @@ The `ralph.sh` script discovers run-scoped PRDs and starts them with `--run <run
 prompt, and syncs story files back into the run PRD after each iteration. Per-story records are appended one JSON
 object per line into `progress/<story_id>.jsonl`.
 
+A story that does not reach `passes: true` gets one story unblock round (`UNBLOCK_STORY.md`). That round first decides
+whether the story was merely unfinished — in which case it finishes it — or genuinely blocked, meaning its acceptance
+criteria cannot be satisfied from inside it because the observation point, the verification setup, or a dependency
+belongs elsewhere. A blocked story is repaired by restructuring the run PRD, re-running the dependency audit against
+the new split, and letting the loop continue on it. Ralph stops for human review only when neither is possible.
+
 ---
 
 ## Checklist Before Saving
 
 Before writing run-scoped `prd.json`, verify:
 
+- [ ] Swept `ralph/tasks/` and `ralph/runs/` for work still in flight and reported it before splitting
+- [ ] No story re-implements a slice an in-flight run already owns, and no criterion assumes code from an unmerged run
 - [ ] Validated the PRD's approach against the user need; if it looked off, confirmed the approach with the user before splitting
 - [ ] `userNeed` (the business-language restatement) is set once at the root (the script copies it into each story at split time)
 - [ ] Every story's `description` ends with a `Covers:` clause, and the clauses tile the whole `userNeed` (no gaps/overlap)
@@ -642,5 +710,5 @@ Before writing run-scoped `prd.json`, verify:
 - [ ] `dependsOn` records the real build and verification edges (no fabricated linear chain)
 - [ ] A separate agent ran the dependency audit; every finding is applied or rejected with a written reason
 - [ ] `deps-audit.json` is written and agrees with `prd.json` edge for edge
-- [ ] Considered splitting into multiple runs; any run-level edges are declared in `dependsOnRuns`
+- [ ] Considered splitting into multiple runs; run-level edges — to new runs and to in-flight ones — are declared in `dependsOnRuns`
 - [ ] `bash ralph/scripts/lint-prd.sh --run <run_id>` reports OK

@@ -1,10 +1,9 @@
 #!/bin/bash
 #
-# End-to-end check for `--tool pi`: the loop has to pick PI.md, run the
-# implementation round with project trust and the write tools intact, run the
-# diagnosis round without them, hand the escalated recovery round its write
-# access back, and price the run from pi's own reported cost instead of Ralph's
-# rate table.
+# End-to-end check for `--tool pi`: the loop has to pick PI.md, run both the
+# implementation round and the unblock round that follows it with project trust
+# and the write tools intact, and price the run from pi's own reported cost
+# instead of Ralph's rate table.
 
 set -e
 
@@ -60,16 +59,9 @@ if [[ "$call_count" -eq 1 ]]; then
   message="Implementation stopped before the acceptance criteria passed."
 else
   message=$(printf '%s\n' \
-    'Story' \
-    'US-001' \
-    'What failed' \
-    'The story remained passes=false.' \
-    'Likely root cause' \
-    'The implementation round did not update the story state (high confidence).' \
-    'Evidence' \
-    'The authoritative story JSON is still incomplete.' \
-    'Recommended human action' \
-    'Inspect the implementation round before rerunning.')
+    'Verdict: blocked, and only a human can resolve it.' \
+    'US-001 needs a product decision no round can make, so restructuring the split would not help.' \
+    'Leaving US-001 at passes=false.')
 fi
 
 # pi repeats the same assistant message on message_end, turn_end and agent_end.
@@ -119,13 +111,13 @@ run_status=$?
 set -e
 
 if [[ "$run_status" -ne 1 ]]; then
-  echo "Expected Ralph to exit 1 after diagnosis, got $run_status" >&2
+  echo "Expected Ralph to exit 1 after the unblock round, got $run_status" >&2
   cat "$OUTPUT_FILE" >&2
   exit 1
 fi
 
-if [[ "$(cat "$COUNT_FILE")" -ne 3 ]]; then
-  echo "Expected one implementation call, one diagnosis call and one recovery call" >&2
+if [[ "$(cat "$COUNT_FILE")" -ne 2 ]]; then
+  echo "Expected one implementation call and one unblock call" >&2
   cat "$OUTPUT_FILE" >&2
   exit 1
 fi
@@ -142,46 +134,33 @@ if sed -n '1p' "$ARGS_FILE" | grep -q -- '--exclude-tools'; then
   exit 1
 fi
 
-if ! sed -n '2p' "$ARGS_FILE" | grep -q -- '--exclude-tools edit,write'; then
-  echo "Expected the diagnosis call to drop pi's edit/write tools" >&2
-  cat "$ARGS_FILE" >&2
-  exit 1
-fi
-
-if ! sed -n '2p' "$ARGS_FILE" | grep -q -- '--no-approve'; then
-  echo "Expected the diagnosis call to skip project-local pi resources" >&2
-  cat "$ARGS_FILE" >&2
-  exit 1
-fi
-
-# pi has no default escalation args, so the recovery round is invoked exactly
-# like the implementation round it is rescuing - write tools and project trust
-# back, nothing appended.
-if [[ "$(sed -n '1p' "$ARGS_FILE")" != "$(sed -n '3p' "$ARGS_FILE")" ]]; then
-  echo "Expected the recovery call to use the implementation round's pi arguments" >&2
+# The unblock round is an ordinary write round, so it is invoked exactly like
+# the implementation round it follows - write tools and project trust intact,
+# nothing appended, nothing removed.
+if [[ "$(sed -n '1p' "$ARGS_FILE")" != "$(sed -n '2p' "$ARGS_FILE")" ]]; then
+  echo "Expected the unblock call to use the implementation round's pi arguments" >&2
   cat "$ARGS_FILE" >&2
   exit 1
 fi
 
 grep -q 'Ralph Agent Instructions For pi' "$PROMPTS_DIR/prompt-1"
-grep -q 'Read-Only Contract' "$PROMPTS_DIR/prompt-2"
+grep -q 'Ralph Story Unblock Round' "$PROMPTS_DIR/prompt-2"
+grep -q '## Story Unblock Context' "$PROMPTS_DIR/prompt-2"
 grep -q 'Implementation stopped before the acceptance criteria passed.' "$PROMPTS_DIR/prompt-2"
-grep -q 'Ralph Story Recovery Round' "$PROMPTS_DIR/prompt-3"
-grep -q '## Story Recovery Context' "$PROMPTS_DIR/prompt-3"
 
-grep -q 'Ralph Failure Diagnosis Round (pi)' "$OUTPUT_FILE"
-grep -q 'The story remained passes=false.' "$OUTPUT_FILE"
-grep -q 'Ralph stopped after diagnosing US-001' "$OUTPUT_FILE"
+grep -q 'Ralph Story Unblock Round (pi)' "$OUTPUT_FILE"
+grep -q 'Verdict: blocked, and only a human can resolve it.' "$OUTPUT_FILE"
+grep -q 'neither finished US-001 nor restructured the backlog around it' "$OUTPUT_FILE"
 
-# 3 calls x (100 new + 10 cache read + 5 cache write + 20 output) tokens, and
-# 3 x $0.0011 reported by pi rather than derived from RALPH_PRICE_*.
+# 2 calls x (100 new + 10 cache read + 5 cache write + 20 output) tokens, and
+# 2 x $0.0011 reported by pi rather than derived from RALPH_PRICE_*.
 grep -q 'Model:         gpt-5.6-sol' "$OUTPUT_FILE"
-grep -q 'Input:         300 (new) + 30 (cache read) + 15 (cache write)' "$OUTPUT_FILE"
-grep -q 'Total tokens:  405' "$OUTPUT_FILE"
+grep -q 'Input:         200 (new) + 20 (cache read) + 10 (cache write)' "$OUTPUT_FILE"
+grep -q 'Total tokens:  270' "$OUTPUT_FILE"
 grep -q 'Cost:          \$<0.01 (reported by the tool)' "$OUTPUT_FILE"
 
 if [[ "$(jq -r '.passes' "$FIXTURE_REPO/ralph/stories/US-001.json")" != "false" ]]; then
-  echo "Neither the diagnosis nor the recovery round should have marked the story complete" >&2
+  echo "The unblock round should not have marked the story complete" >&2
   exit 1
 fi
 

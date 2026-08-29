@@ -24,6 +24,16 @@ sharing its reasoning**.
   disagreement. Do not talk yourself into the existing edge because it is
   already there.
 
+### When the source PRD document is unavailable
+
+You are also run from a **story unblock round**, after that round restructured a
+split around a story it judged blocked. Such a round may have no source PRD
+document to hand you; its brief then says so explicitly. In that case
+`prd.json`'s root `userNeed` is the statement of the need, and it is the only
+one: check Task 2's coverage against it and derive Task 1's edges from the story
+bodies as usual. Do not go hunting for a substitute requirements document, and
+do not accept the restructuring agent's account of the need in place of one.
+
 ## Read-Only Contract
 
 - Do not edit `prd.json`, the source PRD, or any other repository file. You

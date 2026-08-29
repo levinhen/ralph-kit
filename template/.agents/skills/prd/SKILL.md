@@ -17,12 +17,13 @@ Create detailed Product Requirements Documents that are clear, actionable, and s
 
 ## The Job
 
-1. Receive a feature description from the user
-2. Ask clarifying questions (with lettered options), prioritized by importance — no fixed count
-3. Review the answers and ask follow-up questions for anything still ambiguous; iterate until the key information is clear
-4. Restate the need in plain business language and get the user's confirmation before writing
-5. Generate a structured PRD based on answers; record any minor remaining uncertainties in Open Questions
-6. Save to `ralph/tasks/prd-<feature-name>.md` (substitute `<feature-name>` with a kebab-case slug)
+1. Sweep the PRDs that are already in flight and report them to the user (Step 0)
+2. Receive a feature description from the user
+3. Ask clarifying questions (with lettered options), prioritized by importance — no fixed count
+4. Review the answers and ask follow-up questions for anything still ambiguous; iterate until the key information is clear
+5. Restate the need in plain business language and get the user's confirmation before writing
+6. Generate a structured PRD that neither duplicates nor silently contradicts an in-flight PRD; record any minor remaining uncertainties in Open Questions
+7. Save to `ralph/tasks/prd-<feature-name>.md` (substitute `<feature-name>` with a kebab-case slug)
 
 **Important:** Do NOT start implementing. Just create the PRD.
 
@@ -31,6 +32,69 @@ markdown task remains in `ralph/tasks/` while the run is in play (Ralph archives
 `ralph/archive/<date>-<run_id>/` once the run completes), while the Ralph execution file should be generated as
 `ralph/runs/<run_id>/prd.json`. The Ralph skill/script owns run-scoped execution state such as
 `progress/shared-memory.json`, per-story `progress/<story_id>.jsonl`, `state.json`, and per-story `stories/*.json`.
+
+---
+
+## Step 0: Sweep the PRDs Already in Flight
+
+**Do this before you ask a single clarifying question, every time, without being asked to.** A PRD that has been
+written but has not finished executing is invisible unless you go looking for it, and the cost of missing one is a
+second PRD that re-specifies work someone already designed — or quietly contradicts it, so two runs end up fighting
+over the same files.
+
+You do not have to judge what counts as unfinished. Ralph moves a run and its source PRD into
+`ralph/archive/<date>-<run_id>/` only once that run is finished and consolidated, so **whatever is still sitting in
+`ralph/tasks/` or `ralph/runs/` is in flight by definition.** Sweep both, and read how far each one has got:
+
+```bash
+ls ralph/tasks/prd-*.md 2>/dev/null
+for d in ralph/runs/*/; do
+  [ -f "$d/prd.json" ] || continue
+  printf '%s ' "$d"
+  jq -r '"\(.userStories | map(select(.passes == true)) | length)/\(.userStories | length) stories passing"' "$d/prd.json"
+done
+```
+
+Place every PRD the sweep turns up in one of four states. How far it has run is what decides the cost of changing its
+design, so establish this *before* you design anything that touches it:
+
+| State | How to tell | What its design is made of |
+|---|---|---|
+| **Drafted** | `ralph/tasks/prd-<x>.md` exists, no `ralph/runs/<x>/` | Paper. Nothing has been built. |
+| **Split, not started** | run exists, `0/N stories passing` | Paper, plus a story split. Still no code. |
+| **Part-run** | run exists, `k/N` with `0 < k < N` | The passing stories are already code on that run's branch. |
+| **Stories done, not archived** | run exists, `N/N stories passing` | All code, pending merge-back and consolidation. |
+
+Then **report what you found before you start asking questions** — one short list, each PRD with its state, and an
+explicit note on anything that overlaps what the user just asked for. If the sweep comes back empty, say that in one
+line and move on; the absence is part of the report.
+
+---
+
+## Step 0b: Do Not Re-Design What Is Already Designed
+
+The sweep exists so this PRD does not duplicate or silently contradict one that is already in flight. Hold to these
+rules while you write:
+
+- **Overlap → do not re-specify it.** If an in-flight PRD already owns a piece of what the user is asking for, that
+  piece is not yours to write again. Name the PRD that owns it and put it in this PRD's **Non-Goals**, pointing there.
+- **Conflict → you may overturn the other design, but the new design lands here.** You are not bound to a design just
+  because it is already written down. If what the user needs now is incompatible with an in-flight PRD's design,
+  re-decide it — and write the resulting design into **this** PRD, saying plainly which decision in which PRD it
+  supersedes. Do not leave the resolution implicit, and do not go edit the other PRD to match: from that point on,
+  this PRD is the current truth for that decision and the other one is stale.
+- **Overturning something already built is work this PRD has to carry.** Look at the state you recorded above.
+  Overturning *paper* (drafted, or split-but-not-started) costs nothing — the other PRD simply goes stale. But a
+  design that a **part-run** or **stories-done** run already turned into code exists on that run's branch: superseding
+  it means this PRD needs its own user stories for changing that code, with acceptance criteria describing the new
+  behaviour. A PRD that assumes built code will un-build itself produces stories that cannot pass.
+- **Say which in-flight PRD you just made stale.** Ralph keeps executing the other run from its own `prd.json`, which
+  knows nothing about this conversation — editing markdown would not reach it anyway. What to do about that run (let
+  it finish, stop it, re-convert it) is the user's call, so hand them the fact rather than deciding for them.
+
+**Where it lands in the PRD:** overlap goes in **Non-Goals**, naming the PRD that owns it; a superseded decision goes
+in **Technical Considerations**, naming the PRD and the decision it replaces; the work of changing already-built code
+becomes **User Stories** like any other work.
 
 ---
 
@@ -183,7 +247,8 @@ Be explicit and unambiguous.
 
 ### 5. Non-Goals (Out of Scope)
 
-What this feature will NOT include. Critical for managing scope.
+What this feature will NOT include. Critical for managing scope. List here anything an in-flight PRD already owns
+(Step 0), naming that PRD — scope you are deliberately not re-specifying is a non-goal like any other.
 
 ### 6. Design Considerations (Optional)
 
@@ -196,6 +261,7 @@ What this feature will NOT include. Critical for managing scope.
 - Known constraints or dependencies
 - Integration points with existing systems
 - Performance requirements
+- Any decision here that supersedes an in-flight PRD's design (Step 0b) — name the PRD and the decision it replaces
 
 ### 8. Success Metrics
 
@@ -325,6 +391,9 @@ Add priority levels to tasks so users can focus on what matters most. Tasks can 
 
 Before saving the PRD:
 
+- [ ] Swept `ralph/tasks/` and `ralph/runs/` for in-flight PRDs and reported them before asking questions
+- [ ] Nothing in this PRD re-specifies work an in-flight PRD owns; every superseded design names the PRD it replaces
+- [ ] Overturning a design a part-run or finished run already built is carried as real user stories here
 - [ ] Asked clarifying questions with lettered options, prioritized (must-answer first)
 - [ ] Asked follow-up questions until the blocking items were clear
 - [ ] Restated the need in business language (no implementation talk) and got the user's confirmation

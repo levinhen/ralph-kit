@@ -1,6 +1,7 @@
 #!/bin/bash
-# The orchestrator must stop after a failed stage. A run that ends in the
-# failure diagnosis round exits 1, and every later stage has to be skipped.
+# The orchestrator must stop after a failed stage. A run whose unblock round
+# can neither finish the story nor restructure around it exits 1, and every
+# later stage has to be skipped.
 
 set -e
 

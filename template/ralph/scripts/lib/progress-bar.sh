@@ -283,8 +283,7 @@ ralph_progress_render() {
   case "$phase" in
     working) phase_label="working" ;;
     checking) phase_label="checking" ;;
-    diagnosing) phase_label="diagnosing failure" ;;
-    recovering) phase_label="recovering story" ;;
+    unblocking) phase_label="unblocking story" ;;
     finalizing) phase_label="finalizing worktree" ;;
     merge-back) phase_label="merge-back" ;;
     consolidating) phase_label="consolidating" ;;
@@ -292,9 +291,9 @@ ralph_progress_render() {
     *) phase_label="starting" ;;
   esac
 
-  # Both halves of the failure relay get the warning colour: the run is off the
-  # happy path from the diagnosis round until the story is recovered.
-  if [[ "$phase" == "diagnosing" || "$phase" == "recovering" ]]; then
+  # The unblock round gets the warning colour: the run is off the happy path
+  # until the story is finished or the backlog is reshaped around it.
+  if [[ "$phase" == "unblocking" ]]; then
     color="1;33"
   fi
 

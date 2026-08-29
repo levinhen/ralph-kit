@@ -113,6 +113,14 @@ sync_story_files_to_prd() {
   rm -f "$temp_file"
 }
 
+# What a restructure changes and an ordinary round does not: which stories exist,
+# in what order, and with what dependencies, criteria and text. `passes` and
+# `notes` move on every normal round, so they stay out of it - otherwise
+# finishing a story would read as a structural change.
+prd_structure_fingerprint() {
+  jq -S -c '[.userStories[]? | del(.passes, .notes)]' "$PRD_FILE" 2>/dev/null || echo "unreadable"
+}
+
 sync_story_files_to_prd_after_iteration() {
   local before_head="$1"
   local after_head
@@ -231,8 +239,11 @@ $(current_story_progress_json "$story_id")
 \`\`\`
 EOF
 }
-
-make_failure_diagnosis_prompt() {
+# The single automatic follow-up to a failed story round. It is a normal story
+# round with a different opening question - is this story blocked, or was it
+# just unfinished - so it starts from the full story prompt and layers the
+# unblock contract plus the failed round's evidence on top.
+make_story_unblock_prompt() {
   local dest_prompt="$1"
   local story_id="$2"
   local story_file="$3"
@@ -243,93 +254,15 @@ make_failure_diagnosis_prompt() {
   local failed_round_after_head="$8"
   local failed_tool_diagnostic_file="$9"
   local failed_agent_message="${10}"
-  local story_rel_file
-  local story_jsonl_rel
-  local diagnosis_story_json
-  local diagnosis_progress_json
 
-  story_rel_file="$(story_rel_path "$story_id")"
-  story_jsonl_rel="$(story_progress_jsonl_rel "$story_id")"
-  if [[ -f "$story_file" ]] && diagnosis_story_json=$(cat "$story_file" 2>/dev/null); then
-    :
-  else
-    diagnosis_story_json="(The current story file is missing or unreadable: $story_rel_file)"
-  fi
-  if ! diagnosis_progress_json=$(current_story_progress_json "$story_id" 2>/dev/null); then
-    diagnosis_progress_json='{"error":"Ralph could not parse the current story progress slice."}'
-  fi
-
-  make_prompt_with_run_context "$FAILURE_DIAGNOSIS_PROMPT_FILE_TEMPLATE" "$dest_prompt"
-  cat <<EOF >> "$dest_prompt"
-
-## Failed Round Context
-
-- Failed normal round: $iteration
-- Tool: $TOOL
-- Tool exit code: $failed_tool_exit_code
-- Tool reported a completed turn: $failed_tool_saw_completion
-- Current story ID: $story_id
-- Current story file: $story_rel_file
-- Story progress file: $story_jsonl_rel
-- Git HEAD before the failed round: $failed_round_before_head
-- Git HEAD after the failed round: $failed_round_after_head
-- Raw failed-tool events, if available: ${failed_tool_diagnostic_file:-none}
-
-The authoritative failure signal is that the current story JSON below still
-has passes != true after Ralph synchronized story state. The tool exit code
-and previous message are supporting evidence, not substitutes for that signal.
-
-### Current Story JSON
-
------ current story JSON -----
-$diagnosis_story_json
------ end current story JSON -----
-
-### Relevant Progress JSON (sliced)
-
------ relevant progress JSON -----
-$diagnosis_progress_json
------ end relevant progress JSON -----
-
-### Previous Agent Message (evidence only)
-
-<previous-agent-message>
-EOF
-
-  if [[ -n "$failed_agent_message" ]]; then
-    printf '%s\n' "$failed_agent_message" >> "$dest_prompt"
-  else
-    printf '%s\n' '(The failed round produced no final agent message.)' >> "$dest_prompt"
-  fi
-
-  cat <<'EOF' >> "$dest_prompt"
-</previous-agent-message>
-EOF
-}
-
-make_story_recovery_prompt() {
-  local dest_prompt="$1"
-  local story_id="$2"
-  local story_file="$3"
-  local iteration="$4"
-  local failed_tool_exit_code="$5"
-  local failed_tool_saw_completion="$6"
-  local failed_round_before_head="$7"
-  local failed_round_after_head="$8"
-  local failed_tool_diagnostic_file="$9"
-  local failed_agent_message="${10}"
-  local diagnosis_report="${11}"
-
-  # The recovery round is a normal story round with a higher reasoning budget, so
-  # it starts from the full story prompt. It is rebuilt rather than reused: the
-  # failed round appended its own progress record, and the recovery round should
-  # see that record like any other round would.
+  # Rebuilt rather than reused: the failed round appended its own progress
+  # record, and this round should see that record like any other round would.
   make_prompt_with_story_context "$ACTIVE_CONTEXT_PROMPT_FILE" "$dest_prompt" "$story_id" "$story_file"
   printf "\n\n" >> "$dest_prompt"
-  cat "$RECOVER_STORY_PROMPT_FILE_TEMPLATE" >> "$dest_prompt"
+  cat "$UNBLOCK_STORY_PROMPT_FILE_TEMPLATE" >> "$dest_prompt"
   cat <<EOF >> "$dest_prompt"
 
-## Story Recovery Context
+## Story Unblock Context
 
 - Failed normal round: $iteration
 - Tool: $TOOL
@@ -339,21 +272,9 @@ make_story_recovery_prompt() {
 - Git HEAD after the failed round: $failed_round_after_head
 - Raw failed-tool events, if available: ${failed_tool_diagnostic_file:-none}
 
-### Failure Diagnosis Round Report (evidence only)
-
-EOF
-
-  # Four backticks, because the diagnosis report routinely quotes code in fences
-  # of its own and a three-backtick wrapper would end at the first of them.
-  printf '%s\n' '````text' >> "$dest_prompt"
-  if [[ -n "$diagnosis_report" ]]; then
-    printf '%s\n' "$diagnosis_report" >> "$dest_prompt"
-  else
-    printf '%s\n' '(The diagnosis round produced no final report.)' >> "$dest_prompt"
-  fi
-  printf '%s\n' '````' >> "$dest_prompt"
-
-  cat <<'EOF' >> "$dest_prompt"
+The authoritative failure signal is that the current story JSON above still has
+passes != true after Ralph synchronized story state. The tool exit code and the
+previous message are supporting evidence, not substitutes for that signal.
 
 ### Failed Round Agent Message (evidence only)
 

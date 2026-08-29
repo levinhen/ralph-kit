@@ -52,7 +52,9 @@ ralph/runs/<run_id>/prd.json          machine-readable run
         │    3. spawn a fresh claude / codex / pi process
         │    4. agent: implement → checks → passes=true → commit
         │    5. sync story state back into prd.json
-        │       passes!=true → read-only diagnosis round → terminal → stop
+        │       passes!=true → unblock round: blocked? → restructure PRD → loop on
+        │                            not blocked? → finish story → loop on
+        │                            neither? → terminal → stop
         ▼
 all stories passes=true
         │
@@ -134,8 +136,11 @@ ralph/scripts/ralph.sh --run <run_id> --tool claude 20   # or --tool codex (defa
 4. The agent, per its playbook: implements **exactly that one story** (only the slice named in `Covers:`), runs the project's quality checks (typecheck/lint/tests), flips the story file to `passes: true` and writes `notes`, appends a structured progress record via `append-progress-json.sh` (one JSON line into `progress/<story_id>.jsonl`, plus optional `--shared-memory` items for reusable patterns), and commits everything as `feat: [US-xxx] - [Title]`.
    Every agent round also receives a shared **Round Commit Contract**: all intended repository artifacts produced by that round must be committed before it ends, rather than being left for a later story, finalization, merge-back, or consolidation round. A safe, coherent partial result is committed as a checkpoint while the story remains incomplete. Runtime markers, temporary diagnostics, and artifact-free idempotent retries do not require empty commits.
 5. The loop syncs story state back into `prd.json` (amending it into the story commit when safe) and **trusts only the file**. If the current story now has `passes: true`, Ralph advances normally. If it still has `passes != true`—regardless of what the agent claimed—Ralph does not retry the implementation round.
-6. An incomplete story triggers exactly one dedicated **failure diagnosis round** (`DIAGNOSE_FAILURE.md`). It receives the story, recent progress, Git heads, the previous agent message, and raw tool events when available, runs with read-only agent permissions, and produces a structured root-cause report. That report then feeds exactly one **escalated recovery round** (`RECOVER_STORY.md`): a fresh write-capable agent, launched with a higher reasoning budget (`RALPH_*_RECOVERY_ARGS`; codex defaults to `-c model_reasoning_effort=xhigh`), that starts from the diagnosis and makes the last automatic attempt at the story. If the story passes now, the loop advances normally; if it still fails, Ralph prints both the diagnosis report and the recovery round's closing message, then exits `1` — every later round is skipped.
-7. Successful story rounds repeat until every story passes. There is no round budget: because a story that fails even its recovery round ends the run at step 6, the story loop can only move forward through the backlog. The wrap-up rounds are the ones that can retry themselves, so each carries its own small budget (see `RALPH_MAX_*_ROUNDS` below).
+6. An incomplete story triggers exactly one **story unblock round** (`UNBLOCK_STORY.md`). It receives the story, recent progress, Git heads, the previous agent message, and raw tool events when available — and it is not a retry. Before writing any code it answers one question: is this story genuinely blocked, or did the previous round simply not finish it?
+   - **Not blocked** (the default and common answer: budget ran out, the approach was wrong, tests were left failing, the story state was never written) — it continues from whatever the failed round committed and finishes the story. The loop advances normally.
+   - **Blocked** — no amount of implementation effort inside the story can honestly satisfy its acceptance criteria, because the observation point lives in a later story, the story has no observable outlet at all, the verification setup arrives later, or a `dependsOn` edge is missing. That is a decomposition defect, so the round repairs the decomposition: it splits the story, inserts a prerequisite, reorders, adds the missing edges, or moves a criterion to the story that owns its observation point. It may never weaken a criterion, drop a slice of `userNeed`, or mark anything passing. Because the split changed, it re-runs the dependency audit through a fresh isolated agent (`DEPENDENCY_AUDIT.md`) and rewrites `deps-audit.json`, then stops without implementing. Ralph continues the loop on the new split.
+   - **Neither** — a missing human decision, or an environment lacking something no round can create. Ralph prints the round's closing message and exits `1`; every later round is skipped.
+7. Successful story rounds repeat until every story passes. There is no round budget: a story either finishes, gets restructured around, or ends the run at step 6. Restructuring is what lets a failure hand control back to the loop, so it carries its own cap (`RALPH_MAX_RESTRUCTURES`, default 2) — a split that keeps needing repair is a PRD problem for a human. The wrap-up rounds can also retry themselves, so each carries its own small budget (see `RALPH_MAX_*_ROUNDS` below).
 
 Interactive terminals keep a progress bar pinned to the bottom row while agent logs scroll above it:
 
@@ -172,9 +177,9 @@ Where the money comes from depends on the tool, and the row marks the difference
 - **codex** reports tokens but no cost, so Ralph prices it from a rate table. The defaults are the gpt-5.6-sol standard tier ($5 input, $0.50 cached input, $6.25 cache writes, $30 output per 1M tokens); override them if you run a different model. Prompts over 272K input tokens bill at a higher long-context tier that the event stream does not expose per request, so a run that lives there is under-counted unless you raise the rates.
 - **pi** prices each message from its own model catalogue and reports the result, so Ralph uses that number and the real model name — whichever provider/model pi is configured for. The `RALPH_PRICE_*` rates are ignored for pi runs.
 
-Guard rails: a per-invocation idle timeout (default 360 s of silence) and optional hard timeout; a dedicated exit code (75) that aborts the whole loop on provider rate limits; and a post-invocation process-tree sweep that reaps leftover dev servers/watchers (including Windows Git Bash handling). Codex runs with `--json` and pi with `--mode json`, both keeping their normal session: Ralph parses JSONL directly from a pipe, keeps only the latest 100 events in an in-memory ring, and writes those raw events to a temporary diagnostic file only when the invocation fails. The final diagnosis round can inspect that file but cannot modify the repository (`codex --sandbox read-only`; Claude plan permission mode).
+Guard rails: a per-invocation idle timeout (default 360 s of silence) and optional hard timeout; a dedicated exit code (75) that aborts the whole loop on provider rate limits; and a post-invocation process-tree sweep that reaps leftover dev servers/watchers (including Windows Git Bash handling). Codex runs with `--json` and pi with `--mode json`, both keeping their normal session: Ralph parses JSONL directly from a pipe, keeps only the latest 100 events in an in-memory ring, and writes those raw events to a temporary diagnostic file only when the invocation fails. The unblock round is pointed at that file and can read it while deciding what happened.
 
-The diagnosis round is weaker on pi, and deliberately so: pi ships no sandbox, so Ralph bounds that round with what it can actually control — `--exclude-tools edit,write` removes the file-writing tools, and `--no-approve` keeps project-local pi extensions from loading. `bash` stays available because the round has to read Git state, so the no-writes rule there rests on `DIAGNOSE_FAILURE.md` rather than on an enforced boundary. Implementation rounds run `pi --approve`, which does trust project-local `.pi/` settings, extensions, and skills.
+Every round is a write round — the story rounds implement, the wrap-up rounds finalize and merge, and the unblock round either finishes a story or reshapes the backlog — so all of them run with permission prompts bypassed (`claude --dangerously-skip-permissions`, `codex --dangerously-bypass-approvals-and-sandbox`, `pi --approve`, which trusts project-local `.pi/` settings, extensions, and skills).
 
 ### Stage 4 — Merge-back: the branch returns to base
 
@@ -240,10 +245,9 @@ With no `--plan`, the orchestrator reads `dependsOnRuns` across the incomplete r
 | `RALPH_PLAN` | — | default plan for `orchestrate.sh` |
 | `RALPH_IGNORE_RUN_DEPS` | `0` | `1` starts a run even when its `dependsOnRuns` have not merged back yet |
 | `RALPH_SKIP_DEPS_AUDIT` | `0` | `1` lints a run-scoped PRD without requiring a matching `deps-audit.json` |
-| `RALPH_CODEX_RECOVERY_ARGS` | `-c model_reasoning_effort=xhigh` | extra codex args for the escalated recovery round |
-| `RALPH_CLAUDE_RECOVERY_ARGS` / `RALPH_PI_RECOVERY_ARGS` | — | extra claude / pi args for the escalated recovery round |
+| `RALPH_MAX_RESTRUCTURES` | `2` | how many times one run's unblock rounds may reshape the backlog before Ralph stops |
 
-Exit codes: `0` complete, `1` story failed after diagnosis + recovery / a wrap-up round exhausted its budget, `75` rate-limited, `124` tool timeout.
+Exit codes: `0` complete, `1` story failed after its unblock round / the restructure cap was reached / a wrap-up round exhausted its budget, `75` rate-limited, `124` tool timeout.
 
 ## Install
 

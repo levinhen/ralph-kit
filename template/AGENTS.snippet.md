@@ -5,7 +5,7 @@ This project ships the Ralph multi-agent loop under `ralph/` and two companion s
 
 Directory layout:
 
-- `ralph/scripts/` — static loop code: `ralph.sh`, `orchestrate.sh`, `create-run.sh`, `append-progress-json.sh`, `lib/`, and the agent prompt files (`CLAUDE.md`, `CODEX.md`, `PI.md`, `DIAGNOSE_FAILURE.md`, `MERGE_BACK.md`, `CONSOLIDATE.md`).
+- `ralph/scripts/` — static loop code: `ralph.sh`, `orchestrate.sh`, `create-run.sh`, `append-progress-json.sh`, `lib/`, and the agent prompt files (`CLAUDE.md`, `CODEX.md`, `PI.md`, `UNBLOCK_STORY.md`, `DEPENDENCY_AUDIT.md`, `MERGE_BACK.md`, `CONSOLIDATE.md`).
 - `ralph/tasks/` — PRD markdown authored by `/prd` for runs that are still in play (input to `/ralph` and the consolidation round).
 - `ralph/runs/<run_id>/` — active runs (PRD JSON, per-story state, progress logs).
 - `ralph/archive/<date>-<run_id>/` — completed runs after consolidation, together with the run's source PRD markdown (`prd-<run_id>.md`).

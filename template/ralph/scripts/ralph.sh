@@ -37,8 +37,8 @@ while [[ $# -gt 0 ]]; do
       ;;
     *)
       # Ralph used to take a max_iterations budget here, back when a failed
-      # story was retried on the next pass. Failures now end the run through
-      # the diagnosis round, so the number no longer bounds anything a caller
+      # story was retried on the next pass. Failures now go through the
+      # unblock round instead, so the number no longer bounds anything a caller
       # would want bounded - it would only cap how many stories a run can
       # finish. Accept and ignore it so existing wrappers keep working.
       if [[ "$1" =~ ^[0-9]+$ ]]; then
@@ -85,8 +85,7 @@ PI_PROMPT_FILE="$SCRIPT_DIR/PI.md"
 MERGE_BACK_PROMPT_FILE="$SCRIPT_DIR/MERGE_BACK.md"
 MERGE_BACK_STATE_FILE="$RALPH_ROOT/.merge-back-done"
 CONSOLIDATE_PROMPT_FILE_TEMPLATE="$SCRIPT_DIR/CONSOLIDATE.md"
-FAILURE_DIAGNOSIS_PROMPT_FILE_TEMPLATE="$SCRIPT_DIR/DIAGNOSE_FAILURE.md"
-RECOVER_STORY_PROMPT_FILE_TEMPLATE="$SCRIPT_DIR/RECOVER_STORY.md"
+UNBLOCK_STORY_PROMPT_FILE_TEMPLATE="$SCRIPT_DIR/UNBLOCK_STORY.md"
 CONSOLIDATION_STATE_FILE=""
 CONSOLIDATION_STATE_REL_PATH=""
 WORKTREE_ROOT="$REPO_ROOT/.worktrees"
@@ -148,8 +147,7 @@ MERGE_PROMPT_FILE=""
 FINALIZE_PROMPT_FILE=""
 ITERATION_PROMPT_FILE=""
 CONSOLIDATE_PROMPT_FILE=""
-FAILURE_DIAGNOSIS_PROMPT_FILE=""
-RECOVERY_PROMPT_FILE=""
+UNBLOCK_PROMPT_FILE=""
 ROOT_STATE_FILE_WAS_MISSING="false"
 
 if [[ "$RUN_MODE" == "scoped" ]]; then
@@ -185,7 +183,7 @@ cleanup() {
   if [[ "$RALPH_IS_WINDOWS" == "true" && -n "$ACTIVE_WORKTREE" && "$ACTIVE_WORKTREE" != "$REPO_ROOT" ]]; then
     windows_sweep_worktree_strays "$ACTIVE_WORKTREE" || true
   fi
-  rm -f "$ACTIVE_CONTEXT_PROMPT_FILE" "$MERGE_PROMPT_FILE" "$FINALIZE_PROMPT_FILE" "$ITERATION_PROMPT_FILE" "$CONSOLIDATE_PROMPT_FILE" "$FAILURE_DIAGNOSIS_PROMPT_FILE" "$RECOVERY_PROMPT_FILE" || true
+  rm -f "$ACTIVE_CONTEXT_PROMPT_FILE" "$MERGE_PROMPT_FILE" "$FINALIZE_PROMPT_FILE" "$ITERATION_PROMPT_FILE" "$CONSOLIDATE_PROMPT_FILE" "$UNBLOCK_PROMPT_FILE" || true
   release_dir_lock "$MERGE_LOCK_DIR" || true
   release_dir_lock "$RUN_LOCK_DIR" || true
 }
@@ -414,13 +412,8 @@ if [[ "$RUN_MODE" == "scoped" && ! -f "$CONSOLIDATE_PROMPT_FILE_TEMPLATE" ]]; th
   exit 1
 fi
 
-if [[ ! -f "$FAILURE_DIAGNOSIS_PROMPT_FILE_TEMPLATE" ]]; then
-  echo "Error: Missing failure diagnosis prompt file: $FAILURE_DIAGNOSIS_PROMPT_FILE_TEMPLATE"
-  exit 1
-fi
-
-if [[ ! -f "$RECOVER_STORY_PROMPT_FILE_TEMPLATE" ]]; then
-  echo "Error: Missing story recovery prompt file: $RECOVER_STORY_PROMPT_FILE_TEMPLATE"
+if [[ ! -f "$UNBLOCK_STORY_PROMPT_FILE_TEMPLATE" ]]; then
+  echo "Error: Missing story unblock prompt file: $UNBLOCK_STORY_PROMPT_FILE_TEMPLATE"
   exit 1
 fi
 
@@ -510,11 +503,10 @@ fi
 ralph_progress_start "$PRD_FILE" "$PROGRESS_LABEL"
 
 # Story rounds are self-limiting: a story that does not reach passes=true gets
-# one diagnosis round and one escalated recovery round below, and then either
-# moves on or ends the run, so the loop can only walk forward through the
-# backlog. The wrap-up rounds are the ones that can spin, because each one
-# re-runs its agent until a marker file appears - so they carry their own
-# budgets instead of sharing one iteration cap with the stories.
+# one unblock round below, which either finishes it, restructures the backlog
+# around it, or ends the run. The wrap-up rounds are the ones that can spin,
+# because each one re-runs its agent until a marker file appears - so they carry
+# their own budgets instead of sharing one iteration cap with the stories.
 MAX_FINALIZE_ROUNDS="${RALPH_MAX_FINALIZE_ROUNDS:-3}"
 MAX_MERGE_BACK_ROUNDS="${RALPH_MAX_MERGE_BACK_ROUNDS:-3}"
 MAX_CONSOLIDATION_ROUNDS="${RALPH_MAX_CONSOLIDATION_ROUNDS:-3}"
@@ -522,8 +514,15 @@ FINALIZE_ROUNDS=0
 MERGE_BACK_ROUNDS=0
 CONSOLIDATION_ROUNDS=0
 
+# An unblock round that restructures the backlog hands control back to the loop
+# instead of ending the run, which is the one way a story failure does not walk
+# forward. Bound it: a split that keeps needing repair is a PRD problem a human
+# has to look at, not one more restructure away from working.
+MAX_RESTRUCTURES="${RALPH_MAX_RESTRUCTURES:-2}"
+RESTRUCTURES=0
+
 # Counts every round the loop runs, wrap-up rounds included. Nothing is bounded
-# by it; it exists so the terminal, the progress row, and the diagnosis prompt
+# by it; it exists so the terminal, the progress row, and the unblock prompt
 # can all refer to the same round number.
 ROUND=0
 
@@ -541,6 +540,10 @@ wrap_up_budget_exhausted() {
 
 while true; do
   ROUND=$((ROUND + 1))
+  # An unblock round can add stories to the PRD. Back-fill their story files
+  # before syncing back, so a new story is a normal story by the time the loop
+  # picks it up. Existing files are left alone.
+  initialize_story_files
   sync_story_files_to_prd
 
   CURRENT_STORY_ID=$(jq -r '
@@ -732,8 +735,8 @@ EOF
   PRE_ITERATION_HEAD=$(git -C "$ACTIVE_WORKTREE" rev-parse --verify HEAD 2>/dev/null || echo "")
 
   # A story round is never retried blindly. Even when the underlying CLI fails,
-  # let the loop reach the file-based story check so it can run one diagnosis
-  # round and stop with useful evidence.
+  # let the loop reach the file-based story check so it can run the unblock
+  # round with useful evidence in hand.
   DEFER_TOOL_FAILURE_STOP="true"
   run_selected_tool "$ACTIVE_WORKTREE" "$ITERATION_PROMPT_FILE"
   DEFER_TOOL_FAILURE_STOP="false"
@@ -769,16 +772,21 @@ EOF
   if [[ "$STORY_PASSED" != "true" ]]; then
     echo "Warning: $CURRENT_STORY_ID is still not marked passes=true in $PRD_FILE"
 
-    ralph_progress_update "diagnosing" "$CURRENT_STORY_ID" "$ROUND"
+    # The unblock round may rewrite the backlog rather than the code, so capture
+    # what the split looks like now. passes/notes are excluded: those move on
+    # every ordinary round and say nothing about the structure.
+    PRE_UNBLOCK_STRUCTURE=$(prd_structure_fingerprint)
+
+    ralph_progress_update "unblocking" "$CURRENT_STORY_ID" "$ROUND"
     echo ""
     echo "==============================================================="
-    echo "  Ralph Failure Diagnosis Round ($TOOL) - Target: $CURRENT_STORY_ID"
+    echo "  Ralph Story Unblock Round ($TOOL) - Target: $CURRENT_STORY_ID"
     echo "==============================================================="
-    echo "The failed story is not retried blindly. Diagnosing the last round, then making one escalated recovery attempt."
+    echo "The failed story is not retried blindly. One round decides whether it is genuinely blocked, then finishes it or restructures the backlog around it."
 
-    FAILURE_DIAGNOSIS_PROMPT_FILE=$(mktemp)
-    make_failure_diagnosis_prompt \
-      "$FAILURE_DIAGNOSIS_PROMPT_FILE" \
+    UNBLOCK_PROMPT_FILE=$(mktemp)
+    make_story_unblock_prompt \
+      "$UNBLOCK_PROMPT_FILE" \
       "$CURRENT_STORY_ID" \
       "$CURRENT_STORY_FILE" \
       "$ROUND" \
@@ -789,61 +797,23 @@ EOF
       "$FAILED_ROUND_DIAGNOSTIC_FILE" \
       "$FAILED_ROUND_LAST_MESSAGE"
 
-    DEFER_TOOL_FAILURE_STOP="true"
-    run_selected_tool "$ACTIVE_WORKTREE" "$FAILURE_DIAGNOSIS_PROMPT_FILE" "read-only"
-    DEFER_TOOL_FAILURE_STOP="false"
-    rm -f "$FAILURE_DIAGNOSIS_PROMPT_FILE"
-    FAILURE_DIAGNOSIS_PROMPT_FILE=""
-
-    # Every run_selected_tool call overwrites the LAST_* globals, so everything
-    # the stop path still needs from the diagnosis round has to be taken now,
-    # before the recovery round runs.
-    FAILURE_DIAGNOSIS_MESSAGE="$LAST_MESSAGE"
-    if [[ -z "$FAILURE_DIAGNOSIS_MESSAGE" ]]; then
-      FAILURE_DIAGNOSIS_MESSAGE="$OUTPUT"
-    fi
-    FAILURE_DIAGNOSIS_EXIT_CODE="$LAST_TOOL_EXIT_CODE"
-    FAILURE_DIAGNOSIS_DIAGNOSTIC_FILE="$LAST_TOOL_DIAGNOSTIC_FILE"
-
-    ralph_progress_update "recovering" "$CURRENT_STORY_ID" "$ROUND"
-    echo ""
-    echo "==============================================================="
-    echo "  Ralph Story Recovery Round ($TOOL) - Target: $CURRENT_STORY_ID"
-    echo "==============================================================="
-    echo "One escalated attempt at $CURRENT_STORY_ID, carrying the diagnosis report. Ralph stops if it still does not pass."
-
-    RECOVERY_PROMPT_FILE=$(mktemp)
-    make_story_recovery_prompt \
-      "$RECOVERY_PROMPT_FILE" \
-      "$CURRENT_STORY_ID" \
-      "$CURRENT_STORY_FILE" \
-      "$ROUND" \
-      "$FAILED_ROUND_TOOL_EXIT_CODE" \
-      "$FAILED_ROUND_SAW_COMPLETION" \
-      "$PRE_ITERATION_HEAD" \
-      "$FAILED_ROUND_AFTER_HEAD" \
-      "$FAILED_ROUND_DIAGNOSTIC_FILE" \
-      "$FAILED_ROUND_LAST_MESSAGE" \
-      "$FAILURE_DIAGNOSIS_MESSAGE"
-
-    # The failed round and the read-only diagnosis both moved on from
-    # PRE_ITERATION_HEAD, so the recovery round needs its own baseline for the
-    # PRD sync amend.
-    RECOVERY_HEAD_BEFORE=$(git -C "$ACTIVE_WORKTREE" rev-parse --verify HEAD 2>/dev/null || echo "")
+    # The failed round already moved on from PRE_ITERATION_HEAD, so the unblock
+    # round needs its own baseline for the PRD sync amend.
+    UNBLOCK_HEAD_BEFORE=$(git -C "$ACTIVE_WORKTREE" rev-parse --verify HEAD 2>/dev/null || echo "")
 
     DEFER_TOOL_FAILURE_STOP="true"
-    run_selected_tool "$ACTIVE_WORKTREE" "$RECOVERY_PROMPT_FILE" "write" "escalated"
+    run_selected_tool "$ACTIVE_WORKTREE" "$UNBLOCK_PROMPT_FILE"
     DEFER_TOOL_FAILURE_STOP="false"
-    rm -f "$RECOVERY_PROMPT_FILE"
-    RECOVERY_PROMPT_FILE=""
+    rm -f "$UNBLOCK_PROMPT_FILE"
+    UNBLOCK_PROMPT_FILE=""
 
-    RECOVERY_MESSAGE="$LAST_MESSAGE"
-    if [[ -z "$RECOVERY_MESSAGE" ]]; then
-      RECOVERY_MESSAGE="$OUTPUT"
+    UNBLOCK_MESSAGE="$LAST_MESSAGE"
+    if [[ -z "$UNBLOCK_MESSAGE" ]]; then
+      UNBLOCK_MESSAGE="$OUTPUT"
     fi
-    RECOVERY_DIAGNOSTIC_FILE="$LAST_TOOL_DIAGNOSTIC_FILE"
+    UNBLOCK_DIAGNOSTIC_FILE="$LAST_TOOL_DIAGNOSTIC_FILE"
 
-    sync_story_files_to_prd_after_iteration "$RECOVERY_HEAD_BEFORE"
+    sync_story_files_to_prd_after_iteration "$UNBLOCK_HEAD_BEFORE"
     ralph_progress_update "checking" "$CURRENT_STORY_ID" "$ROUND"
 
     STORY_PASSED=$(jq -r --arg story_id "$CURRENT_STORY_ID" '
@@ -854,7 +824,7 @@ EOF
 
     if [[ "$STORY_PASSED" == "true" ]]; then
       echo ""
-      echo "Ralph recovered $CURRENT_STORY_ID in the escalated recovery round."
+      echo "Ralph finished $CURRENT_STORY_ID in the unblock round: it was unfinished, not blocked."
       # Hand back to the top of the loop rather than deciding anything here: the
       # next iteration re-derives the backlog and takes the all-complete,
       # merge-back and consolidation paths on its own.
@@ -863,36 +833,52 @@ EOF
       continue
     fi
 
-    # Release the pinned row before printing the durable handoff so the reports
-    # remain readable at the user's shell prompt.
+    # A story can also leave the round still failing because the round agreed it
+    # was blocked and reshaped the backlog instead. That is a legitimate outcome:
+    # the next round starts on whatever the new split puts first.
+    if [[ "$(prd_structure_fingerprint)" != "$PRE_UNBLOCK_STRUCTURE" ]]; then
+      RESTRUCTURES=$((RESTRUCTURES + 1))
+      echo ""
+      echo "The unblock round judged $CURRENT_STORY_ID blocked and restructured the backlog in $PRD_REL_PATH."
+      echo "Stories now: $(jq -r '[.userStories[].id] | join(", ")' "$PRD_FILE" 2>/dev/null || echo "unreadable")"
+      if [[ "$RESTRUCTURES" -le "$MAX_RESTRUCTURES" ]]; then
+        echo "Restructure $RESTRUCTURES of $MAX_RESTRUCTURES for this run. Continuing on the new split..."
+        sleep 2
+        continue
+      fi
+
+      ralph_progress_stop || true
+      echo ""
+      echo "================= Ralph Story Unblock Round ================="
+      printf '%s\n' "$UNBLOCK_MESSAGE"
+      echo "============================================================="
+      echo "Ralph restructured the backlog $RESTRUCTURES times in this run (limit $MAX_RESTRUCTURES) and stories are still failing."
+      echo "A split that keeps needing repair is a PRD problem. Review $PRD_REL_PATH and the reports above before rerunning."
+      notify_ralph_needs_attention "backlog restructured $RESTRUCTURES times without the run progressing"
+      exit 1
+    fi
+
+    # Release the pinned row before printing the durable handoff so the report
+    # remains readable at the user's shell prompt.
     ralph_progress_stop || true
     echo ""
-    echo "================ Ralph Failure Diagnosis ================"
-    if [[ -n "$FAILURE_DIAGNOSIS_MESSAGE" ]]; then
-      printf '%s\n' "$FAILURE_DIAGNOSIS_MESSAGE"
+    echo "================= Ralph Story Unblock Round ================="
+    if [[ -n "$UNBLOCK_MESSAGE" ]]; then
+      printf '%s\n' "$UNBLOCK_MESSAGE"
     else
-      echo "The diagnosis agent produced no final report (exit $FAILURE_DIAGNOSIS_EXIT_CODE)."
-      if [[ -n "$FAILURE_DIAGNOSIS_DIAGNOSTIC_FILE" ]]; then
-        echo "Its recent raw events are available at: $FAILURE_DIAGNOSIS_DIAGNOSTIC_FILE"
-      fi
-    fi
-    echo "============ Ralph Escalated Recovery Round ============="
-    if [[ -n "$RECOVERY_MESSAGE" ]]; then
-      printf '%s\n' "$RECOVERY_MESSAGE"
-    else
-      echo "The recovery agent produced no final report (exit $LAST_TOOL_EXIT_CODE)."
+      echo "The unblock agent produced no final report (exit $LAST_TOOL_EXIT_CODE)."
     fi
     # Only a failed CLI leaves a diagnostic file behind, so each of these lines
     # appears exactly when that round's tool itself went wrong.
-    if [[ -n "$RECOVERY_DIAGNOSTIC_FILE" ]]; then
-      echo "The recovery round's raw events are available at: $RECOVERY_DIAGNOSTIC_FILE"
+    if [[ -n "$UNBLOCK_DIAGNOSTIC_FILE" ]]; then
+      echo "The unblock round's raw events are available at: $UNBLOCK_DIAGNOSTIC_FILE"
     fi
     if [[ -n "$FAILED_ROUND_DIAGNOSTIC_FILE" ]]; then
       echo "The failed implementation round's raw events are available at: $FAILED_ROUND_DIAGNOSTIC_FILE"
     fi
-    echo "==========================================================="
-    echo "Ralph stopped after diagnosing $CURRENT_STORY_ID and one escalated recovery round. Review the reports above before rerunning."
-    notify_ralph_needs_attention "story $CURRENT_STORY_ID still failing after diagnosis + escalated recovery"
+    echo "============================================================="
+    echo "Ralph stopped: the unblock round neither finished $CURRENT_STORY_ID nor restructured the backlog around it. Review the report above before rerunning."
+    notify_ralph_needs_attention "story $CURRENT_STORY_ID still failing after the unblock round"
     exit 1
   fi
 

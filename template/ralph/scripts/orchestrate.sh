@@ -927,7 +927,7 @@ execute_stage() {
 
   # Reap in completion order rather than launch order. Waiting on pids[0] first
   # would hide a later sibling's failure until every earlier run has finished,
-  # so the failure is recorded the moment the run exits (after its own diagnosis
+  # so the failure is recorded the moment the run exits (after its own unblock
   # round). Siblings still run to completion; only the next stage is withheld.
   while [[ ${#pending[@]} -gt 0 ]]; do
     still=()

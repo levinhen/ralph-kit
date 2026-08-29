@@ -53,10 +53,6 @@ EOF
 run_selected_tool() {
   local run_cwd="$1"
   local prompt_file="$2"
-  local access_mode="${3:-write}"
-  local escalation="${4:-normal}"
-  local escalation_args_raw=""
-  local escalation_args=()
   local stream_state_dir=""
   local activity_file=""
   local summary_file=""
@@ -77,79 +73,31 @@ run_selected_tool() {
 
   node_bin="$(require_tool_command node node node.exe)" || return $?
 
-  if [[ "$access_mode" != "write" && "$access_mode" != "read-only" ]]; then
-    echo "Error: Invalid Ralph tool access mode '$access_mode'." >&2
-    return 1
-  fi
-
-  if [[ "$escalation" != "normal" && "$escalation" != "escalated" ]]; then
-    echo "Error: Invalid Ralph tool escalation '$escalation'." >&2
-    return 1
-  fi
-
-  # The story recovery round is the only escalated invocation: same CLI, extra
-  # args that buy it a bigger reasoning budget than the round it is rescuing.
-  # `${VAR-default}` rather than `${VAR:-default}` on purpose - setting the
-  # variable to an empty string is how a caller says "escalate this tool with no
-  # extra args at all". The value is split on whitespace, so an argument that
-  # itself contains a space is not supported.
-  if [[ "$escalation" == "escalated" ]]; then
-    case "$TOOL" in
-      claude) escalation_args_raw="${RALPH_CLAUDE_RECOVERY_ARGS-}" ;;
-      codex)  escalation_args_raw="${RALPH_CODEX_RECOVERY_ARGS--c model_reasoning_effort=xhigh}" ;;
-      pi)     escalation_args_raw="${RALPH_PI_RECOVERY_ARGS-}" ;;
-    esac
-    read -r -a escalation_args <<< "$escalation_args_raw" || true
-  fi
-
+  # Every Ralph round is a write round: the story rounds implement, the wrap-up
+  # rounds finalize and merge, and the unblock round either finishes a story or
+  # restructures the backlog. The read-only invocation modes went away with the
+  # separate diagnosis round.
   case "$TOOL" in
     claude)
       tool_bin="$(require_tool_command "$TOOL" claude claude.cmd)" || return $?
-      if [[ "$access_mode" == "read-only" ]]; then
-        command_args=("$tool_bin" --permission-mode plan --print --verbose --output-format stream-json)
-      else
-        command_args=("$tool_bin" --dangerously-skip-permissions --print --verbose --output-format stream-json)
-      fi
-      command_args+=("${escalation_args[@]}")
+      command_args=("$tool_bin" --dangerously-skip-permissions --print --verbose --output-format stream-json)
       ;;
     codex)
       LAST_MESSAGE_FILE=$(mktemp)
       tool_bin="$(require_tool_command "$TOOL" codex codex.cmd)" || return $?
-      if [[ "$access_mode" == "read-only" ]]; then
-        command_args=("$tool_bin" exec \
-          --cd "$run_cwd" \
-          --sandbox read-only \
-          --config 'approval_policy="never"' \
-          --skip-git-repo-check \
-          --json \
-          --output-last-message "$LAST_MESSAGE_FILE")
-      else
-        command_args=("$tool_bin" exec \
-          --cd "$run_cwd" \
-          --dangerously-bypass-approvals-and-sandbox \
-          --skip-git-repo-check \
-          --json \
-          --output-last-message "$LAST_MESSAGE_FILE")
-      fi
       # `-` is codex's "take the prompt from stdin" positional and has to stay
-      # last: codex reads anything after it as a second positional, so escalation
-      # args appended at the end would silently stop being flags.
-      command_args+=("${escalation_args[@]}" -)
+      # last: codex reads anything after it as a second positional.
+      command_args=("$tool_bin" exec \
+        --cd "$run_cwd" \
+        --dangerously-bypass-approvals-and-sandbox \
+        --skip-git-repo-check \
+        --json \
+        --output-last-message "$LAST_MESSAGE_FILE" \
+        -)
       ;;
     pi)
       tool_bin="$(require_tool_command "$TOOL" pi pi.cmd)" || return $?
-      # pi ships no sandbox of its own (by design - see its security docs), so a
-      # read-only round is bounded by the two things Ralph can actually control:
-      # the edit/write tools are removed, and project-local pi extensions stay
-      # unloaded so the repository cannot hand the diagnosis round new tools.
-      # `bash` survives because the round has to inspect git state; the rest of
-      # the contract lives in DIAGNOSE_FAILURE.md.
-      if [[ "$access_mode" == "read-only" ]]; then
-        command_args=("$tool_bin" --print --mode json --no-approve --exclude-tools edit,write)
-      else
-        command_args=("$tool_bin" --print --mode json --approve)
-      fi
-      command_args+=("${escalation_args[@]}")
+      command_args=("$tool_bin" --print --mode json --approve)
       ;;
     *)
       echo "Error: Ralph does not know how to run tool '$TOOL'." >&2
@@ -274,7 +222,7 @@ run_selected_tool() {
 
 # Most dedicated phases can retry a transient tool failure. Story rounds set
 # DEFER_TOOL_FAILURE_STOP because an incomplete story is handled immediately by
-# the diagnosis + recovery relay instead of another blind implementation round.
+# the unblock round instead of another blind implementation round.
 record_tool_outcome() {
   local limit="${RALPH_MAX_CONSECUTIVE_FAILURES:-3}"
 

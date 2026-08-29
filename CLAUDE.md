@@ -45,12 +45,24 @@ npm test
   them from `SCRIPT_DIR` and folds them into a temporary prompt file, so a new
   prompt file needs no worktree copy and no entry in `sync_root_ralph_inputs`.
   Copying them into the worktree is what used to go stale — do not add it back.
-- **The dependency fields have five consumers.** `dependsOn` (story-level) and
+- **The dependency fields have six consumers.** `dependsOn` (story-level) and
   `dependsOnRuns` (run-level) are documented in the ralph skill, enforced by
   `lint-prd.sh`, gated at `ralph.sh` startup, scheduled from by
-  `orchestrate.sh` graph mode, and described in both READMEs. A semantic change
-  to either field must visit all five, or the lint will accept what the
+  `orchestrate.sh` graph mode, described in both READMEs, and — for `dependsOn`
+  — mirrored edge for edge in each run's `deps-audit.json`. A semantic change
+  to either field must visit all six, or the lint will accept what the
   scheduler misreads (or vice versa).
+- **`dependsOn` is audited by a second agent, and the lint enforces that.**
+  `/ralph` must hand the finished split to a separate agent running
+  `DEPENDENCY_AUDIT.md`, which re-derives the edges and the `Covers:` coverage
+  from the source PRD alone; the resolved result lands in
+  `ralph/runs/<run_id>/deps-audit.json`. `lint-prd.sh` requires that file for a
+  run-scoped PRD and compares `storyOrder` and `edges` against `prd.json`, so an
+  edge edited afterwards invalidates the audit rather than outliving it. The
+  audit is deliberately not self-servable: the splitting agent is anchored on
+  its own shape and re-reading it produces agreement, not an audit. Keep the
+  skill's `deps-audit.json` schema and the lint's checks in sync — the skill is
+  the only place an agent learns the shape the lint demands.
 - **The failure path is described in four places.** Story failure runs
   diagnosis (`DIAGNOSE_FAILURE.md`, read-only) then one escalated recovery
   round (`RECOVER_STORY.md`, fed the diagnosis report), then stops. The three

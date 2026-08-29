@@ -384,10 +384,11 @@ if [[ "$RUN_MODE" == "scoped" ]]; then
 fi
 
 # Catch a malformed backlog before any story state is derived from it: broken
-# ids, dangling or forward `dependsOn` edges, cycles, and bad `dependsOnRuns`
-# references all make the run's story order meaningless. Lint the root-side
-# PRD, not the worktree copy: they were just synced, and only the root side can
-# resolve `dependsOnRuns` references against the live runs/ and archive/ dirs.
+# ids, dangling or forward `dependsOn` edges, cycles, bad `dependsOnRuns`
+# references, and a missing or stale dependency audit all make the run's story
+# order meaningless. Lint the root-side PRD, not the worktree copy: they were
+# just synced, and only the root side can resolve `dependsOnRuns` references
+# against the live runs/ and archive/ dirs and find the run's deps-audit.json.
 if ! PRD_LINT_OUTPUT="$(bash "$SCRIPT_DIR/lint-prd.sh" "$ROOT_PRD_FILE" 2>&1)"; then
   printf '%s\n' "$PRD_LINT_OUTPUT"
   echo "Error: Ralph PRD failed validation: $ROOT_PRD_FILE"

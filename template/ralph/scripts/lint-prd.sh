@@ -1,11 +1,15 @@
 #!/bin/bash
-# Lint a Ralph prd.json: story ids, `dependsOn` edges between stories, and
-# `dependsOnRuns` references to other runs.
+# Lint a Ralph prd.json: story ids, `dependsOn` edges between stories,
+# `dependsOnRuns` references to other runs, and the dependency audit that a
+# run-scoped PRD must carry beside it.
 #
 # Usage:
 #   ./lint-prd.sh --run <run_id>       Lint ralph/runs/<run_id>/prd.json
 #   ./lint-prd.sh <path/to/prd.json>   Lint the PRD file at that path
 #   ./lint-prd.sh --all                Lint every ralph/runs/*/prd.json
+#
+# Env:
+#   RALPH_SKIP_DEPS_AUDIT=1            Skip the deps-audit.json requirement
 #
 # Prints `ERROR: <file>: <message>` once per problem and exits 1 if any file has
 # one; otherwise prints `OK: <file>` per linted file and exits 0.
@@ -52,7 +56,7 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     -h|--help)
-      sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//'
+      sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//'
       exit 0
       ;;
     -*)
@@ -174,6 +178,92 @@ def reachability($adj; $nodes):
 JQ
 )"
 
+# The dependency audit that a run-scoped PRD carries beside it. Checked against
+# the PRD itself: the audit has to name the same stories in the same order and
+# agree on every edge, so a `dependsOn` edited after the audit ran invalidates
+# it instead of silently outliving it. One message per line.
+DEPS_AUDIT_JQ="$(
+  cat <<'JQ'
+. as $audit
+| ($prd[0].userStories // []) as $stories
+| [$stories[] | .id] as $order
+| ($stories | map({key: .id, value: ((.dependsOn // []) | sort)}) | from_entries) as $prdEdges
+| ["missing-edge", "spurious-edge", "coverage-gap", "coverage-overlap"] as $kinds
+| (
+  (
+    if ($audit.runId // "") != $runId then
+      "runId \($audit.runId | tojson) does not match the run directory '\($runId)'"
+    else
+      empty
+    end
+  ),
+  (
+    if ($audit.storyOrder | type) != "array" then
+      "storyOrder must be an array listing every story id in prd.json order"
+    elif $audit.storyOrder != $order then
+      "storyOrder \($audit.storyOrder | tojson) does not match prd.json's story order \($order | tojson); the split changed since the audit ran, so re-run the dependency audit against the current split"
+    else
+      empty
+    end
+  ),
+  (
+    if ($audit.edges | type) != "object" then
+      "edges must be an object mapping every story id to the dependency list the audit derived"
+    else
+      ($audit.edges | keys_unsorted) as $auditIds
+      | (
+          (($order - $auditIds)[] | "edges is missing story '\(.)'"),
+          (($auditIds - $order)[] | "edges names unknown story '\(.)'"),
+          ($order[] | . as $id
+            | select(($auditIds | index($id)) != null)
+            | ($audit.edges[$id]) as $edge
+            | if ($edge | type) != "array" then
+                "edges['\($id)'] must be an array of story ids"
+              elif ([$edge[] | select(type != "string")] | length) > 0 then
+                "edges['\($id)'] has a non-string entry"
+              elif ($edge | sort) != ($prdEdges[$id] // []) then
+                "edges['\($id)'] is \($edge | tojson) but prd.json's dependsOn is \(($prdEdges[$id] // []) | tojson); the audit and the PRD must agree edge for edge"
+              else
+                empty
+              end)
+        )
+    end
+  ),
+  (
+    if ($audit.coverage // "") != "complete" then
+      "coverage is \($audit.coverage | tojson); it must be \"complete\". A coverage-gap or coverage-overlap means the split still needs fixing: fix it, re-run the audit, and record the resolved findings here"
+    else
+      empty
+    end
+  ),
+  (
+    if ($audit.findings | type) != "array" then
+      "findings must be an array; use [] when the audit found nothing"
+    else
+      ($audit.findings | to_entries[] | . as $f
+        | (
+            (if ($kinds | index($f.value.kind)) == null then
+               "findings[\($f.key)] has kind \($f.value.kind | tojson); expected one of \($kinds | join(", "))"
+             else
+               empty
+             end),
+            (if (($f.value.detail | type) != "string") or ($f.value.detail | test("^[[:space:]]*$")) then
+               "findings[\($f.key)] needs a non-empty detail saying what the audit found"
+             else
+               empty
+             end),
+            (if (($f.value.resolution | type) != "string") or (($f.value.resolution | test("^(applied|rejected: .+)$")) | not) then
+               "findings[\($f.key)] needs a resolution of \"applied\" or \"rejected: <reason>\""
+             else
+               empty
+             end)
+          ))
+    end
+  )
+)
+JQ
+)"
+
 ERROR_COUNT=0
 LINT_RUN_ID=""
 LINT_RALPH_ROOT=""
@@ -243,6 +333,46 @@ lint_depends_on_runs() {
   ' "$prd_file" 2>/dev/null || true)
 }
 
+# A run-scoped PRD must carry `deps-audit.json` beside it: the record of a
+# separate agent re-deriving the dependency edges and the `Covers:` coverage
+# from the source PRD alone. Legacy `ralph/prd.json` and bare paths have no run
+# directory to hold one, so they are exempt.
+lint_deps_audit() {
+  local prd_file="$1"
+  local audit_file
+  local message
+
+  if [[ "${RALPH_SKIP_DEPS_AUDIT:-0}" == "1" ]]; then
+    return
+  fi
+
+  if [[ -z "$LINT_RUN_ID" ]]; then
+    return
+  fi
+
+  audit_file="$(dirname "$prd_file")/deps-audit.json"
+
+  if [[ ! -f "$audit_file" ]]; then
+    report_error "$prd_file" "no deps-audit.json beside it; a run-scoped PRD needs the dependency audit from ralph/scripts/DEPENDENCY_AUDIT.md before it can run (set RALPH_SKIP_DEPS_AUDIT=1 to bypass)"
+    return
+  fi
+
+  if ! jq -e . "$audit_file" >/dev/null 2>&1; then
+    report_error "$audit_file" "not valid JSON"
+    return
+  fi
+
+  if [[ "$(jq -r 'type' "$audit_file")" != "object" ]]; then
+    report_error "$audit_file" "top-level JSON value must be an object"
+    return
+  fi
+
+  while IFS= read -r message; do
+    [[ -n "$message" ]] || continue
+    report_error "$audit_file" "$message"
+  done < <(jq -r --arg runId "$LINT_RUN_ID" --slurpfile prd "$prd_file" "$DEPS_AUDIT_JQ" "$audit_file")
+}
+
 lint_prd_file() {
   local prd_file="$1"
   local errors_before="$ERROR_COUNT"
@@ -258,13 +388,23 @@ lint_prd_file() {
     return
   fi
 
+  local structurally_sound="true"
+
   while IFS= read -r message; do
     [[ -n "$message" ]] || continue
     report_error "$prd_file" "$message"
+    structurally_sound="false"
   done < <(jq -r "$LINT_JQ" "$prd_file")
 
   infer_run_context "$prd_file"
   lint_depends_on_runs "$prd_file"
+
+  # Auditing a backlog whose ids or edges are already broken just echoes those
+  # errors back one per finding. Report the split first; the audit is checked
+  # once there is a split worth auditing.
+  if [[ "$structurally_sound" == "true" ]]; then
+    lint_deps_audit "$prd_file"
+  fi
 
   if [[ "$ERROR_COUNT" -eq "$errors_before" ]]; then
     printf 'OK: %s\n' "$prd_file"

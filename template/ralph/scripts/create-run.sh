@@ -1,6 +1,12 @@
 #!/bin/bash
 # Create a run-scoped Ralph directory from an existing prd.json.
 # Usage: ./create-run.sh [--force] <run_id> [source_prd_json]
+#
+# The closing lint requires a deps-audit.json in the new run dir, so a run
+# created from a hand-written prd.json fails that lint until the dependency
+# audit (DEPENDENCY_AUDIT.md) has run. The run dir is left in place when the
+# lint fails: write the audit beside the copied prd.json and re-lint, or set
+# RALPH_SKIP_DEPS_AUDIT=1 for a run that predates the audit.
 
 set -e
 

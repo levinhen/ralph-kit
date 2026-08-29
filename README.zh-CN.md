@@ -83,13 +83,15 @@ consolidation 回合   沉淀运行学到的设计 → docs/design-ledger/
 
 1. **方案校验** —— 从 PRD 的引言里还原用户的真实诉求，审视 PRD 中隐含的实现方案；如果存在明显更优的做法，先停下来与你确认方向。
 2. **故事拆分** —— 从确认后的方案重新推导故事。第一铁律：**每个故事必须能在一个 agent 上下文窗口内完成**（"加一列字段 + 迁移"是合适的粒度，"做完整个看板"不是）。故事按依赖排序（schema → 后端 → UI），且每条真实依赖——构建依赖*和验证依赖*——都要显式写进故事的 `dependsOn`。每条验收标准都必须可机械验证（"typecheck 通过"可以，"工作正常"不行），**并且在本故事自己的回合内就能观察到**：一条要等后面的故事落地才能验证的标准，说明拆错的是故事而不是措辞。真正由多个独立可交付物组成的工作，应拆成多个 run、用根级 `dependsOnRuns` 连接，而不是堆成一条超长故事列表。
-3. **run 脚手架** —— 写出 `ralph/runs/<run_id>/`：
+3. **依赖审计** —— 拆解的 agent 无权为自己画的依赖图签字。由一个*独立的* agent 只拿到源 PRD 和成稿的 `prd.json`（拿不到拆解者的任何推理过程），重新推导每一条 `dependsOn` 边，并复核所有 `Covers:` 子句是否铺满 `userNeed`。它的发现要么被采纳、要么被书面驳回，最终图记录进 `deps-audit.json`。真正要抓的是漏掉的*验证依赖*——某个故事被排在"能让人观察到它"的东西之前，这种问题在故事内部再怎么努力实现也解决不了。
+4. **run 脚手架** —— 写出 `ralph/runs/<run_id>/`：
 
 ```
 ralph/runs/<run_id>/
 ├── prd.json                     # branchName、userNeed、userStories[]（passes:false）
 ├── progress.txt                 # 人类可读的进度日志
 ├── progress/shared-memory.json  # []——跨故事的模式/坑
+├── deps-audit.json              # 另一个 agent 对依赖图的独立复核结果
 └── state.json                   # runId、baseBranch、baseSha、targetBranch、status
 ```
 
@@ -102,7 +104,7 @@ ralph/runs/<run_id>/
 
 （已经有现成的 `prd.json`？用 `ralph/scripts/create-run.sh <run_id> path/to/prd.json` 可以生成同样的脚手架。）
 
-`ralph/scripts/lint-prd.sh --run <run_id>` 负责校验产物：悬空、前向、自引用或成环的 `dependsOn`，以及指向不存在 run 的 `dependsOnRuns`，都会被拒绝。`ralph.sh` 启动时也会跑同一个 lint，PRD 不过就拒绝启动。
+`ralph/scripts/lint-prd.sh --run <run_id>` 负责校验产物：悬空、前向、自引用或成环的 `dependsOn`，以及指向不存在 run 的 `dependsOnRuns`，都会被拒绝。它还要求 run 目录里有 `deps-audit.json`，并与 `prd.json` **逐边比对**——所以审计跑完之后再去改某条 `dependsOn`，只会让审计作废、必须重跑，而不会让它悄悄蒙混过关。`ralph.sh` 启动时也会跑同一个 lint，PRD 不过就拒绝启动。（`RALPH_SKIP_DEPS_AUDIT=1` 用于豁免审计机制引入之前建立的旧 run。）
 
 ### 阶段 3 —— 执行：`ralph.sh` 循环，每个故事一个全新 agent
 
@@ -235,6 +237,7 @@ ralph/scripts/orchestrate.sh --tool claude --plan "1 > 2,3 > 4"   # 手工阶段
 | `RALPH_NOTIFY` / `RALPH_NOTIFY_SOUND` | `1` | 桌面通知 |
 | `RALPH_PLAN` | — | `orchestrate.sh` 的默认计划 |
 | `RALPH_IGNORE_RUN_DEPS` | `0` | 设为 `1` 时，即使 `dependsOnRuns` 尚未 merge 回基线也照常启动 |
+| `RALPH_SKIP_DEPS_AUDIT` | `0` | 设为 `1` 时，lint run 级 PRD 不再要求配套的 `deps-audit.json` |
 | `RALPH_CODEX_RECOVERY_ARGS` | `-c model_reasoning_effort=xhigh` | 升级修复轮附加给 codex 的额外参数 |
 | `RALPH_CLAUDE_RECOVERY_ARGS` / `RALPH_PI_RECOVERY_ARGS` | — | 升级修复轮附加给 claude / pi 的额外参数 |
 

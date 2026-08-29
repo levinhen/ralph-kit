@@ -85,13 +85,15 @@ Run `/ralph` on the PRD. This is a thinking step, not a transcription step:
 
 1. **Approach validation** — it recovers the user's actual need from the PRD intro, sanity-checks the solution baked into the PRD, and stops to discuss with you if a clearly better approach exists.
 2. **Story splitting** — it re-derives stories from the agreed approach. The number-one rule: **each story must be completable inside one agent context window** ("add a column + migration" is right-sized; "build the whole dashboard" is not). Stories are ordered so dependencies come first (schema → backend → UI), and every real edge — build *and verification* dependencies — is written into each story's `dependsOn`. Every acceptance criterion must be mechanically checkable ("typecheck passes", not "works well") **and observable inside the story's own round**: a criterion only a later story can demonstrate means the split is wrong, not the wording. Work that is really several independent deliverables becomes several runs linked by root-level `dependsOnRuns` instead of one long story list.
-3. **Run scaffolding** — it writes `ralph/runs/<run_id>/`:
+3. **Dependency audit** — the splitting agent does not get to sign off on its own graph. A *separate* agent, given only the source PRD and the finished `prd.json` and never the splitter's reasoning, re-derives every `dependsOn` edge and re-checks that the `Covers:` clauses tile `userNeed`. Its findings are applied (or rejected in writing) and the resolved graph is recorded in `deps-audit.json`. The point is the missing *verification* edge — a story scheduled before the thing that would let anyone observe it is done, which no amount of implementation effort inside that story can fix.
+4. **Run scaffolding** — it writes `ralph/runs/<run_id>/`:
 
 ```
 ralph/runs/<run_id>/
 ├── prd.json                     # branchName, userNeed, userStories[] (passes:false)
 ├── progress.txt                 # human-readable progress log
 ├── progress/shared-memory.json  # [] — cross-story patterns/gotchas
+├── deps-audit.json              # a second agent's independent read of the dependency graph
 └── state.json                   # runId, baseBranch, baseSha, targetBranch, status
 ```
 
@@ -104,7 +106,7 @@ Two fields make memoryless execution work:
 
 (Already have a `prd.json`? `ralph/scripts/create-run.sh <run_id> path/to/prd.json` scaffolds the same layout.)
 
-`ralph/scripts/lint-prd.sh --run <run_id>` validates the result: dangling, forward, self, or cyclic `dependsOn` edges and `dependsOnRuns` entries naming runs that don't exist are all rejected. `ralph.sh` runs the same lint at startup and refuses to start on a failing PRD.
+`ralph/scripts/lint-prd.sh --run <run_id>` validates the result: dangling, forward, self, or cyclic `dependsOn` edges and `dependsOnRuns` entries naming runs that don't exist are all rejected. It also requires the run's `deps-audit.json` and compares it against `prd.json` **edge for edge** — so editing a `dependsOn` after the audit ran invalidates the audit instead of quietly outliving it, and the audit has to be redone. `ralph.sh` runs the same lint at startup and refuses to start on a failing PRD. (`RALPH_SKIP_DEPS_AUDIT=1` exempts runs created before the audit existed.)
 
 ### Stage 3 — Execute: `ralph.sh` loops one fresh agent per story
 
@@ -237,6 +239,7 @@ With no `--plan`, the orchestrator reads `dependsOnRuns` across the incomplete r
 | `RALPH_NOTIFY` / `RALPH_NOTIFY_SOUND` | `1` | desktop notifications |
 | `RALPH_PLAN` | — | default plan for `orchestrate.sh` |
 | `RALPH_IGNORE_RUN_DEPS` | `0` | `1` starts a run even when its `dependsOnRuns` have not merged back yet |
+| `RALPH_SKIP_DEPS_AUDIT` | `0` | `1` lints a run-scoped PRD without requiring a matching `deps-audit.json` |
 | `RALPH_CODEX_RECOVERY_ARGS` | `-c model_reasoning_effort=xhigh` | extra codex args for the escalated recovery round |
 | `RALPH_CLAUDE_RECOVERY_ARGS` / `RALPH_PI_RECOVERY_ARGS` | — | extra claude / pi args for the escalated recovery round |
 

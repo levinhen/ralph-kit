@@ -1,10 +1,11 @@
 #!/bin/bash
 #
 # lint-prd.sh pins the shape of a run backlog: unique story ids, `dependsOn`
-# edges that point backwards at real stories, no cycles, and `dependsOnRuns`
-# entries naming runs that exist. ralph.sh lints the active PRD at startup and,
-# for a scoped run, additionally refuses to start while a run it depends on has
-# not landed on the base branch.
+# edges that point backwards at real stories, no cycles, `dependsOnRuns`
+# entries naming runs that exist, and a deps-audit.json that still describes the
+# split beside it. ralph.sh lints the active PRD at startup and, for a scoped
+# run, additionally refuses to start while a run it depends on has not landed on
+# the base branch.
 
 set -e
 
@@ -159,6 +160,24 @@ new_run_prd() {
       ]
     }
   ' > "$RALPH_ROOT/runs/$run_id/prd.json"
+
+  write_deps_audit "$run_id"
+}
+
+# A run-scoped PRD only lints once a dependency audit sits beside it. The
+# single-story fixture above has one story and no edges, so its audit is fixed.
+write_deps_audit() {
+  local run_id="$1"
+
+  jq -n --arg runId "$run_id" '
+    {
+      runId: $runId,
+      storyOrder: ["US-001"],
+      edges: {"US-001": []},
+      coverage: "complete",
+      findings: []
+    }
+  ' > "$RALPH_ROOT/runs/$run_id/deps-audit.json"
 }
 
 new_run_prd "needs-missing" '["ghost-run"]'
@@ -189,6 +208,148 @@ expect_lint_ok "bare path skips run existence" "$SCRATCH/bare-deps.json"
 
 rm -rf "$RALPH_ROOT/runs/needs-missing" "$RALPH_ROOT/runs/needs-archived" \
   "$RALPH_ROOT/runs/needs-self" "$RALPH_ROOT/runs/needs-bad-charset"
+
+# --- Dependency audit ---------------------------------------------------------
+
+# A run-scoped PRD carries deps-audit.json: the record of a separate agent
+# re-deriving the edges. Without it, or once it stops describing the split it
+# audited, the run must not start.
+
+audit_run_prd() {
+  local run_id="$1"
+  local stories="$2"
+
+  mkdir -p "$RALPH_ROOT/runs/$run_id"
+  jq -n --argjson stories "$stories" '
+    {
+      project: "audit test",
+      branchName: "",
+      dependsOnRuns: [],
+      userStories: $stories
+    }
+  ' > "$RALPH_ROOT/runs/$run_id/prd.json"
+}
+
+audit_json() {
+  cat > "$RALPH_ROOT/runs/audited/deps-audit.json"
+}
+
+audit_run_prd "audited" '[
+  {"id": "US-001", "title": "Schema", "dependsOn": [], "passes": false},
+  {"id": "US-002", "title": "Badge", "dependsOn": ["US-001"], "passes": false}
+]'
+
+expect_lint_error "missing deps audit" \
+  "no deps-audit.json beside it" --run audited
+
+# The gate exists for runs written after the audit landed; older runs opt out.
+# Set and unset explicitly: a `VAR=1 func` prefix on a shell function has
+# unspecified scope, and a leak would silently disable every case below.
+export RALPH_SKIP_DEPS_AUDIT=1
+expect_lint_ok "deps audit bypass" --run audited
+unset RALPH_SKIP_DEPS_AUDIT
+
+audit_json <<'JSON'
+{
+  "runId": "audited",
+  "storyOrder": ["US-001", "US-002"],
+  "edges": {"US-001": [], "US-002": ["US-001"]},
+  "coverage": "complete",
+  "findings": [
+    {
+      "kind": "missing-edge",
+      "storyId": "US-002",
+      "detail": "Observing the badge needs the column US-001 adds.",
+      "resolution": "applied"
+    }
+  ]
+}
+JSON
+expect_lint_ok "matching deps audit" --run audited
+
+audit_json <<'JSON'
+{
+  "runId": "some-other-run",
+  "storyOrder": ["US-001", "US-002"],
+  "edges": {"US-001": [], "US-002": ["US-001"]},
+  "coverage": "complete",
+  "findings": []
+}
+JSON
+expect_lint_error "audit run id mismatch" \
+  "does not match the run directory 'audited'" --run audited
+
+# The edge comparison is what makes the audit outlive nothing: editing a
+# dependsOn after the audit ran invalidates it instead of passing unnoticed.
+audit_json <<'JSON'
+{
+  "runId": "audited",
+  "storyOrder": ["US-001", "US-002"],
+  "edges": {"US-001": [], "US-002": []},
+  "coverage": "complete",
+  "findings": []
+}
+JSON
+expect_lint_error "audit disagrees on an edge" \
+  "edges\['US-002'\] is \[\] but prd.json's dependsOn is \[\"US-001\"\]" --run audited
+
+audit_json <<'JSON'
+{
+  "runId": "audited",
+  "storyOrder": ["US-001"],
+  "edges": {"US-001": []},
+  "coverage": "complete",
+  "findings": []
+}
+JSON
+expect_lint_error "audit predates a story" \
+  "does not match prd.json's story order" --run audited
+
+audit_json <<'JSON'
+{
+  "runId": "audited",
+  "storyOrder": ["US-001", "US-002"],
+  "edges": {"US-001": [], "US-002": ["US-001"]},
+  "coverage": "gaps",
+  "findings": []
+}
+JSON
+expect_lint_error "audit reports an unresolved coverage gap" \
+  'coverage is "gaps"; it must be "complete"' --run audited
+
+audit_json <<'JSON'
+{
+  "runId": "audited",
+  "storyOrder": ["US-001", "US-002"],
+  "edges": {"US-001": [], "US-002": ["US-001"]},
+  "coverage": "complete",
+  "findings": [{"kind": "missing-edge", "storyId": "US-002", "detail": "Needs the column."}]
+}
+JSON
+expect_lint_error "audit finding without a resolution" \
+  'needs a resolution of "applied" or "rejected: <reason>"' --run audited
+
+audit_json <<'JSON'
+{
+  "runId": "audited",
+  "storyOrder": ["US-001", "US-002"],
+  "edges": {"US-001": [], "US-002": ["US-001"]},
+  "coverage": "complete",
+  "findings": [{"kind": "looks-off", "detail": "Something.", "resolution": "applied"}]
+}
+JSON
+expect_lint_error "audit finding with an unknown kind" \
+  'has kind "looks-off"' --run audited
+
+# A legacy ralph/prd.json has no run directory to hold an audit, so it is exempt
+# — which is also what keeps the rest of the suite on the legacy path working.
+jq -n '{
+  userStories: [{id: "US-001", title: "First", passes: false}]
+}' > "$RALPH_ROOT/prd.json"
+expect_lint_ok "legacy prd needs no audit" "$RALPH_ROOT/prd.json"
+rm -f "$RALPH_ROOT/prd.json"
+
+rm -rf "$RALPH_ROOT/runs/audited"
 
 # --- ralph.sh startup gate ----------------------------------------------------
 

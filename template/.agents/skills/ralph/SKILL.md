@@ -37,6 +37,9 @@ Also initialize these companion files for a new run:
 - `ralph/runs/<run_id>/progress.txt` with a Ralph progress header
 - `ralph/runs/<run_id>/progress/shared-memory.json` initialized to `[]` (cross-story patterns/gotchas)
 - `ralph/runs/<run_id>/state.json` with `runId`, `baseBranch`, `baseSha`, `targetBranch`, and `status: "ready"`
+- `ralph/runs/<run_id>/deps-audit.json` written **after** a separate agent audits the split — see
+  [Dependency Audit: A Separate Agent Re-derives the Edges](#dependency-audit-a-separate-agent-re-derives-the-edges).
+  The lint refuses a run-scoped PRD that has no matching audit beside it, so the run cannot start without one.
 
 Per-story progress records are appended to `ralph/runs/<run_id>/progress/<story_id>.jsonl` (one JSON object per
 line, append-only) by `append-progress-json.sh` at iteration time. Do not pre-create those `.jsonl` files. Do not
@@ -57,7 +60,7 @@ After writing the run files, always lint the PRD and fix everything it reports b
 bash ralph/scripts/lint-prd.sh --run <run_id>
 ```
 
-The lint rejects dangling, forward, self, and cyclic `dependsOn` references, and `dependsOnRuns` entries that point at runs which do not exist. `ralph.sh` runs the same lint at startup and refuses to start on a failing PRD.
+The lint rejects dangling, forward, self, and cyclic `dependsOn` references, `dependsOnRuns` entries that point at runs which do not exist, and a `deps-audit.json` that is missing or no longer matches the split it audited. `ralph.sh` runs the same lint at startup and refuses to start on a failing PRD.
 
 ---
 
@@ -303,6 +306,107 @@ one from the future.
 
 ---
 
+## Dependency Audit: A Separate Agent Re-derives the Edges
+
+**This step is mandatory and you may not perform it yourself.** Once the split is written, a *different* agent — a
+fresh context that has not seen your reasoning — re-derives every `dependsOn` edge and checks the `Covers:` coverage
+from the source PRD and `prd.json` alone. Only after its findings are resolved does the run get its
+`deps-audit.json`, and `lint-prd.sh` refuses a run-scoped PRD without a matching one.
+
+**Why it cannot be you.** By the time you reach `dependsOn` you have already committed to a shape. A missed
+verification edge is invisible from inside that shape: you know why US-003 comes after US-002, so "US-003 depends on
+US-002" and "US-003 happens to follow US-002" feel like the same statement. A reader who never saw your reasoning has
+to derive the edge from the story bodies, and derives a different answer when the edge is not really there. Re-reading
+your own split produces agreement, not an audit.
+
+### Running the audit
+
+Spawn one fresh agent and give it **exactly three things**:
+
+1. `ralph/scripts/DEPENDENCY_AUDIT.md` as its instructions,
+2. the path to the source PRD document (`ralph/tasks/prd-<feature>.md`),
+3. the path to `ralph/runs/<run_id>/prd.json`.
+
+Use whatever isolation this session actually has — a subagent/task tool the host provides, or a one-shot CLI
+subprocess, which works from any of the three tools:
+
+```bash
+# Pick the line for the CLI you are running under.
+claude -p "$(cat ralph/scripts/DEPENDENCY_AUDIT.md)  Source PRD: ralph/tasks/prd-<feature>.md  prd.json: ralph/runs/<run_id>/prd.json"
+codex exec "$(cat ralph/scripts/DEPENDENCY_AUDIT.md)  Source PRD: ralph/tasks/prd-<feature>.md  prd.json: ralph/runs/<run_id>/prd.json"
+pi -p "$(cat ralph/scripts/DEPENDENCY_AUDIT.md)  Source PRD: ralph/tasks/prd-<feature>.md  prd.json: ralph/runs/<run_id>/prd.json"
+```
+
+**Do not send it your rationale.** No explanation of why you drew an edge, no summary of your approach discussion, no
+"I split it this way because…". Every sentence of yours that reaches the auditor moves its answer toward yours, which
+is the one thing the audit is supposed to be independent of. The three inputs above are the whole brief.
+
+Unlike browser verification, this has no `unavailable` fallback: the lint blocks the run either way, so if no
+isolation mechanism works, say so to the user and stop rather than auditing your own split.
+
+### Resolving the findings
+
+The auditor reports `missing-edge` / `spurious-edge` / `coverage-gap` / `coverage-overlap` findings. Work through
+every one:
+
+- **`missing-edge`** — the auditor derived an edge you did not write. Default to **applying** it. This is the finding
+  that actually breaks runs: a story starts before what it needs exists, fails, and burns the diagnosis and recovery
+  rounds on a scheduling problem no amount of implementation effort can fix.
+- **`spurious-edge`** — the auditor could not justify an edge you wrote. Either remove it or state the justification
+  the auditor lacked. A fake edge is not harmless: it serializes work that could have run in parallel and it buries
+  the real edges among invented ones.
+- **`coverage-gap`** — a slice of `userNeed` no story's `Covers:` clause claims. Fix the split, not just the wording:
+  either add the missing story or extend the story that should own that slice.
+- **`coverage-overlap`** — two stories claim the same slice. Decide which one owns it and narrow the other.
+
+Rejecting a finding is allowed, but it costs you a written reason in the audit record. If applying the findings
+changes story order or adds stories, **re-run the audit against the revised split** — the record has to describe the
+split that will actually execute.
+
+### Recording the result
+
+Write `ralph/runs/<run_id>/deps-audit.json`:
+
+```json
+{
+  "runId": "task-status",
+  "storyOrder": ["US-001", "US-002", "US-003", "US-004"],
+  "edges": {
+    "US-001": [],
+    "US-002": ["US-001"],
+    "US-003": ["US-001", "US-002"],
+    "US-004": ["US-001"]
+  },
+  "coverage": "complete",
+  "findings": [
+    {
+      "kind": "missing-edge",
+      "storyId": "US-003",
+      "detail": "US-003's criterion is observed by looking at a task row, and the row only renders its status once US-002 adds the badge.",
+      "resolution": "applied"
+    }
+  ]
+}
+```
+
+- **`runId`** must match the run directory name.
+- **`storyOrder`** lists every story id in `prd.json` order.
+- **`edges`** repeats every story's final `dependsOn`. The lint compares it against `prd.json` **edge for edge**, so
+  copying it is a last read-through of the graph — and any later change to a `dependsOn` invalidates the audit instead
+  of silently outliving it.
+- **`coverage`** must be `"complete"`. A gap or an overlap means the split still needs fixing: fix it, re-run the
+  audit, then record the resolved findings.
+- **`findings`** records every finding the auditor raised, with `kind` (one of the four above), optional `storyId`,
+  a non-empty `detail`, and a `resolution` of `"applied"` or `"rejected: <reason>"`. Use `[]` when the audit came back
+  clean — that is a real and common outcome, not a reason to invent findings.
+
+Then re-run `bash ralph/scripts/lint-prd.sh --run <run_id>` and fix anything it reports.
+
+> `RALPH_SKIP_DEPS_AUDIT=1` bypasses the check. It exists for runs created before the audit was introduced. Do not
+> reach for it to get past a lint error on a run you just wrote — that is the case the gate is for.
+
+---
+
 ## Conversion Rules
 
 1. **Each user story becomes one JSON entry**
@@ -322,7 +426,10 @@ one from the future.
     only point at earlier array entries. Omit or leave `[]` for genuinely independent stories — do not fabricate a
     linear chain.
 11. **dependsOnRuns**: At the root, list the run ids this run needs merged back first; `[]` when independent.
-12. **Lint before handoff**: `bash ralph/scripts/lint-prd.sh --run <run_id>` must pass; fix reported errors by fixing
+12. **Dependency audit**: a separate agent re-derives the edges and the `Covers:` coverage per
+    [Dependency Audit](#dependency-audit-a-separate-agent-re-derives-the-edges); its resolved findings and the final
+    graph go into `ralph/runs/<run_id>/deps-audit.json`. Never audit your own split.
+13. **Lint before handoff**: `bash ralph/scripts/lint-prd.sh --run <run_id>` must pass; fix reported errors by fixing
     the split, not by deleting the dependency fields.
 
 ### Branch and Worktree Rules
@@ -533,5 +640,7 @@ Before writing run-scoped `prd.json`, verify:
 - [ ] No story depends on a later story
 - [ ] Verification closure dry-run done: every criterion is observable in its own story's round
 - [ ] `dependsOn` records the real build and verification edges (no fabricated linear chain)
+- [ ] A separate agent ran the dependency audit; every finding is applied or rejected with a written reason
+- [ ] `deps-audit.json` is written and agrees with `prd.json` edge for edge
 - [ ] Considered splitting into multiple runs; any run-level edges are declared in `dependsOnRuns`
 - [ ] `bash ralph/scripts/lint-prd.sh --run <run_id>` reports OK

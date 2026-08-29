@@ -86,6 +86,7 @@ MERGE_BACK_PROMPT_FILE="$SCRIPT_DIR/MERGE_BACK.md"
 MERGE_BACK_STATE_FILE="$RALPH_ROOT/.merge-back-done"
 CONSOLIDATE_PROMPT_FILE_TEMPLATE="$SCRIPT_DIR/CONSOLIDATE.md"
 FAILURE_DIAGNOSIS_PROMPT_FILE_TEMPLATE="$SCRIPT_DIR/DIAGNOSE_FAILURE.md"
+RECOVER_STORY_PROMPT_FILE_TEMPLATE="$SCRIPT_DIR/RECOVER_STORY.md"
 CONSOLIDATION_STATE_FILE=""
 CONSOLIDATION_STATE_REL_PATH=""
 WORKTREE_ROOT="$REPO_ROOT/.worktrees"
@@ -108,6 +109,7 @@ ACTIVE_WORKTREE=""
 LIB_DIR="$SCRIPT_DIR/lib"
 
 source "$LIB_DIR/process.sh"
+source "$LIB_DIR/run-deps.sh"
 source "$LIB_DIR/runs.sh"
 source "$LIB_DIR/worktree.sh"
 source "$LIB_DIR/notify.sh"
@@ -147,6 +149,7 @@ FINALIZE_PROMPT_FILE=""
 ITERATION_PROMPT_FILE=""
 CONSOLIDATE_PROMPT_FILE=""
 FAILURE_DIAGNOSIS_PROMPT_FILE=""
+RECOVERY_PROMPT_FILE=""
 ROOT_STATE_FILE_WAS_MISSING="false"
 
 if [[ "$RUN_MODE" == "scoped" ]]; then
@@ -182,7 +185,7 @@ cleanup() {
   if [[ "$RALPH_IS_WINDOWS" == "true" && -n "$ACTIVE_WORKTREE" && "$ACTIVE_WORKTREE" != "$REPO_ROOT" ]]; then
     windows_sweep_worktree_strays "$ACTIVE_WORKTREE" || true
   fi
-  rm -f "$ACTIVE_CONTEXT_PROMPT_FILE" "$MERGE_PROMPT_FILE" "$FINALIZE_PROMPT_FILE" "$ITERATION_PROMPT_FILE" "$CONSOLIDATE_PROMPT_FILE" "$FAILURE_DIAGNOSIS_PROMPT_FILE" || true
+  rm -f "$ACTIVE_CONTEXT_PROMPT_FILE" "$MERGE_PROMPT_FILE" "$FINALIZE_PROMPT_FILE" "$ITERATION_PROMPT_FILE" "$CONSOLIDATE_PROMPT_FILE" "$FAILURE_DIAGNOSIS_PROMPT_FILE" "$RECOVERY_PROMPT_FILE" || true
   release_dir_lock "$MERGE_LOCK_DIR" || true
   release_dir_lock "$RUN_LOCK_DIR" || true
 }
@@ -342,6 +345,56 @@ if [[ ! -f "$PRD_FILE" ]]; then
   exit 1
 fi
 
+# A run's worktree is cut from the base branch, so a run it depends on has to
+# have landed there (or been archived) before this one can see that work. Runs
+# are resolved against the root checkout, never the worktree copy: the worktree
+# is a base-branch snapshot from when it was created, so a dependency that
+# merged back later is invisible there. A dependency that does not exist at all
+# on the root side is left for the lint below, which names it precisely.
+if [[ "$RUN_MODE" == "scoped" ]]; then
+  UNMET_RUN_DEPS=()
+
+  while IFS= read -r DEP_RUN_ID; do
+    [[ -n "$DEP_RUN_ID" ]] || continue
+    if run_dependency_satisfied "$RALPH_ROOT" "$REPO_ROOT" "$DEP_RUN_ID"; then
+      continue
+    fi
+    if [[ -f "$RALPH_ROOT/runs/$DEP_RUN_ID/prd.json" ]]; then
+      UNMET_RUN_DEPS+=("$DEP_RUN_ID")
+    fi
+  done < <(jq -r '
+    (.dependsOnRuns // [])
+    | if type == "array" then .[] else empty end
+    | select(type == "string")
+  ' "$ROOT_PRD_FILE" 2>/dev/null || true)
+
+  if [[ "${#UNMET_RUN_DEPS[@]}" -gt 0 ]]; then
+    if [[ "${RALPH_IGNORE_RUN_DEPS:-0}" == "1" ]]; then
+      echo "Warning: Ralph run $RUN_ID depends on runs that have not landed on $BASE_BRANCH yet:"
+      printf '  - %s\n' "${UNMET_RUN_DEPS[@]}"
+      echo "Starting anyway because RALPH_IGNORE_RUN_DEPS=1."
+    else
+      echo "Error: Ralph run $RUN_ID depends on runs that have not landed on $BASE_BRANCH yet:"
+      printf '  - %s\n' "${UNMET_RUN_DEPS[@]}"
+      echo "This run's worktree is created from $BASE_BRANCH, so it would not see their work."
+      echo "Finish and merge those runs back first, or set RALPH_IGNORE_RUN_DEPS=1 to start anyway."
+      exit 1
+    fi
+  fi
+fi
+
+# Catch a malformed backlog before any story state is derived from it: broken
+# ids, dangling or forward `dependsOn` edges, cycles, and bad `dependsOnRuns`
+# references all make the run's story order meaningless. Lint the root-side
+# PRD, not the worktree copy: they were just synced, and only the root side can
+# resolve `dependsOnRuns` references against the live runs/ and archive/ dirs.
+if ! PRD_LINT_OUTPUT="$(bash "$SCRIPT_DIR/lint-prd.sh" "$ROOT_PRD_FILE" 2>&1)"; then
+  printf '%s\n' "$PRD_LINT_OUTPUT"
+  echo "Error: Ralph PRD failed validation: $ROOT_PRD_FILE"
+  echo "Fix the problems above, then rerun."
+  exit 1
+fi
+
 initialize_ralph_story_state
 
 TOOL_PROMPT_FILE="$(resolve_tool_prompt)"
@@ -362,6 +415,11 @@ fi
 
 if [[ ! -f "$FAILURE_DIAGNOSIS_PROMPT_FILE_TEMPLATE" ]]; then
   echo "Error: Missing failure diagnosis prompt file: $FAILURE_DIAGNOSIS_PROMPT_FILE_TEMPLATE"
+  exit 1
+fi
+
+if [[ ! -f "$RECOVER_STORY_PROMPT_FILE_TEMPLATE" ]]; then
+  echo "Error: Missing story recovery prompt file: $RECOVER_STORY_PROMPT_FILE_TEMPLATE"
   exit 1
 fi
 
@@ -450,11 +508,12 @@ if [[ -z "$PROGRESS_LABEL" && -n "$TARGET_BRANCH" ]]; then
 fi
 ralph_progress_start "$PRD_FILE" "$PROGRESS_LABEL"
 
-# Story rounds are self-limiting: a story that does not reach passes=true ends
-# the run through the diagnosis round below, so the loop can only walk forward
-# through the backlog. The wrap-up rounds are the ones that can spin, because
-# each one re-runs its agent until a marker file appears - so they carry their
-# own budgets instead of sharing one iteration cap with the stories.
+# Story rounds are self-limiting: a story that does not reach passes=true gets
+# one diagnosis round and one escalated recovery round below, and then either
+# moves on or ends the run, so the loop can only walk forward through the
+# backlog. The wrap-up rounds are the ones that can spin, because each one
+# re-runs its agent until a marker file appears - so they carry their own
+# budgets instead of sharing one iteration cap with the stories.
 MAX_FINALIZE_ROUNDS="${RALPH_MAX_FINALIZE_ROUNDS:-3}"
 MAX_MERGE_BACK_ROUNDS="${RALPH_MAX_MERGE_BACK_ROUNDS:-3}"
 MAX_CONSOLIDATION_ROUNDS="${RALPH_MAX_CONSOLIDATION_ROUNDS:-3}"
@@ -714,7 +773,7 @@ EOF
     echo "==============================================================="
     echo "  Ralph Failure Diagnosis Round ($TOOL) - Target: $CURRENT_STORY_ID"
     echo "==============================================================="
-    echo "The failed story will not be retried. Diagnosing the last round, then stopping."
+    echo "The failed story is not retried blindly. Diagnosing the last round, then making one escalated recovery attempt."
 
     FAILURE_DIAGNOSIS_PROMPT_FILE=$(mktemp)
     make_failure_diagnosis_prompt \
@@ -735,30 +794,104 @@ EOF
     rm -f "$FAILURE_DIAGNOSIS_PROMPT_FILE"
     FAILURE_DIAGNOSIS_PROMPT_FILE=""
 
+    # Every run_selected_tool call overwrites the LAST_* globals, so everything
+    # the stop path still needs from the diagnosis round has to be taken now,
+    # before the recovery round runs.
     FAILURE_DIAGNOSIS_MESSAGE="$LAST_MESSAGE"
     if [[ -z "$FAILURE_DIAGNOSIS_MESSAGE" ]]; then
       FAILURE_DIAGNOSIS_MESSAGE="$OUTPUT"
     fi
+    FAILURE_DIAGNOSIS_EXIT_CODE="$LAST_TOOL_EXIT_CODE"
+    FAILURE_DIAGNOSIS_DIAGNOSTIC_FILE="$LAST_TOOL_DIAGNOSTIC_FILE"
 
-    # Release the pinned row before printing the durable handoff so the report
-    # remains readable at the user's shell prompt.
+    ralph_progress_update "recovering" "$CURRENT_STORY_ID" "$ROUND"
+    echo ""
+    echo "==============================================================="
+    echo "  Ralph Story Recovery Round ($TOOL) - Target: $CURRENT_STORY_ID"
+    echo "==============================================================="
+    echo "One escalated attempt at $CURRENT_STORY_ID, carrying the diagnosis report. Ralph stops if it still does not pass."
+
+    RECOVERY_PROMPT_FILE=$(mktemp)
+    make_story_recovery_prompt \
+      "$RECOVERY_PROMPT_FILE" \
+      "$CURRENT_STORY_ID" \
+      "$CURRENT_STORY_FILE" \
+      "$ROUND" \
+      "$FAILED_ROUND_TOOL_EXIT_CODE" \
+      "$FAILED_ROUND_SAW_COMPLETION" \
+      "$PRE_ITERATION_HEAD" \
+      "$FAILED_ROUND_AFTER_HEAD" \
+      "$FAILED_ROUND_DIAGNOSTIC_FILE" \
+      "$FAILED_ROUND_LAST_MESSAGE" \
+      "$FAILURE_DIAGNOSIS_MESSAGE"
+
+    # The failed round and the read-only diagnosis both moved on from
+    # PRE_ITERATION_HEAD, so the recovery round needs its own baseline for the
+    # PRD sync amend.
+    RECOVERY_HEAD_BEFORE=$(git -C "$ACTIVE_WORKTREE" rev-parse --verify HEAD 2>/dev/null || echo "")
+
+    DEFER_TOOL_FAILURE_STOP="true"
+    run_selected_tool "$ACTIVE_WORKTREE" "$RECOVERY_PROMPT_FILE" "write" "escalated"
+    DEFER_TOOL_FAILURE_STOP="false"
+    rm -f "$RECOVERY_PROMPT_FILE"
+    RECOVERY_PROMPT_FILE=""
+
+    RECOVERY_MESSAGE="$LAST_MESSAGE"
+    if [[ -z "$RECOVERY_MESSAGE" ]]; then
+      RECOVERY_MESSAGE="$OUTPUT"
+    fi
+    RECOVERY_DIAGNOSTIC_FILE="$LAST_TOOL_DIAGNOSTIC_FILE"
+
+    sync_story_files_to_prd_after_iteration "$RECOVERY_HEAD_BEFORE"
+    ralph_progress_update "checking" "$CURRENT_STORY_ID" "$ROUND"
+
+    STORY_PASSED=$(jq -r --arg story_id "$CURRENT_STORY_ID" '
+      .userStories[]
+      | select(.id == $story_id)
+      | .passes
+    ' "$PRD_FILE" 2>/dev/null || echo "false")
+
+    if [[ "$STORY_PASSED" == "true" ]]; then
+      echo ""
+      echo "Ralph recovered $CURRENT_STORY_ID in the escalated recovery round."
+      # Hand back to the top of the loop rather than deciding anything here: the
+      # next iteration re-derives the backlog and takes the all-complete,
+      # merge-back and consolidation paths on its own.
+      echo "Round $ROUND complete. Continuing..."
+      sleep 2
+      continue
+    fi
+
+    # Release the pinned row before printing the durable handoff so the reports
+    # remain readable at the user's shell prompt.
     ralph_progress_stop || true
     echo ""
     echo "================ Ralph Failure Diagnosis ================"
     if [[ -n "$FAILURE_DIAGNOSIS_MESSAGE" ]]; then
       printf '%s\n' "$FAILURE_DIAGNOSIS_MESSAGE"
     else
-      echo "The diagnosis agent produced no final report (exit $LAST_TOOL_EXIT_CODE)."
-      if [[ -n "$LAST_TOOL_DIAGNOSTIC_FILE" ]]; then
-        echo "Its recent raw events are available at: $LAST_TOOL_DIAGNOSTIC_FILE"
-      fi
-      if [[ -n "$FAILED_ROUND_DIAGNOSTIC_FILE" ]]; then
-        echo "The failed implementation round's raw events are available at: $FAILED_ROUND_DIAGNOSTIC_FILE"
+      echo "The diagnosis agent produced no final report (exit $FAILURE_DIAGNOSIS_EXIT_CODE)."
+      if [[ -n "$FAILURE_DIAGNOSIS_DIAGNOSTIC_FILE" ]]; then
+        echo "Its recent raw events are available at: $FAILURE_DIAGNOSIS_DIAGNOSTIC_FILE"
       fi
     fi
+    echo "============ Ralph Escalated Recovery Round ============="
+    if [[ -n "$RECOVERY_MESSAGE" ]]; then
+      printf '%s\n' "$RECOVERY_MESSAGE"
+    else
+      echo "The recovery agent produced no final report (exit $LAST_TOOL_EXIT_CODE)."
+    fi
+    # Only a failed CLI leaves a diagnostic file behind, so each of these lines
+    # appears exactly when that round's tool itself went wrong.
+    if [[ -n "$RECOVERY_DIAGNOSTIC_FILE" ]]; then
+      echo "The recovery round's raw events are available at: $RECOVERY_DIAGNOSTIC_FILE"
+    fi
+    if [[ -n "$FAILED_ROUND_DIAGNOSTIC_FILE" ]]; then
+      echo "The failed implementation round's raw events are available at: $FAILED_ROUND_DIAGNOSTIC_FILE"
+    fi
     echo "==========================================================="
-    echo "Ralph stopped after diagnosing $CURRENT_STORY_ID. Review the report above before rerunning."
-    notify_ralph_needs_attention "story $CURRENT_STORY_ID did not pass; diagnosis printed to the terminal"
+    echo "Ralph stopped after diagnosing $CURRENT_STORY_ID and one escalated recovery round. Review the reports above before rerunning."
+    notify_ralph_needs_attention "story $CURRENT_STORY_ID still failing after diagnosis + escalated recovery"
     exit 1
   fi
 

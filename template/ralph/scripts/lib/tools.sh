@@ -54,6 +54,9 @@ run_selected_tool() {
   local run_cwd="$1"
   local prompt_file="$2"
   local access_mode="${3:-write}"
+  local escalation="${4:-normal}"
+  local escalation_args_raw=""
+  local escalation_args=()
   local stream_state_dir=""
   local activity_file=""
   local summary_file=""
@@ -79,6 +82,26 @@ run_selected_tool() {
     return 1
   fi
 
+  if [[ "$escalation" != "normal" && "$escalation" != "escalated" ]]; then
+    echo "Error: Invalid Ralph tool escalation '$escalation'." >&2
+    return 1
+  fi
+
+  # The story recovery round is the only escalated invocation: same CLI, extra
+  # args that buy it a bigger reasoning budget than the round it is rescuing.
+  # `${VAR-default}` rather than `${VAR:-default}` on purpose - setting the
+  # variable to an empty string is how a caller says "escalate this tool with no
+  # extra args at all". The value is split on whitespace, so an argument that
+  # itself contains a space is not supported.
+  if [[ "$escalation" == "escalated" ]]; then
+    case "$TOOL" in
+      claude) escalation_args_raw="${RALPH_CLAUDE_RECOVERY_ARGS-}" ;;
+      codex)  escalation_args_raw="${RALPH_CODEX_RECOVERY_ARGS--c model_reasoning_effort=xhigh}" ;;
+      pi)     escalation_args_raw="${RALPH_PI_RECOVERY_ARGS-}" ;;
+    esac
+    read -r -a escalation_args <<< "$escalation_args_raw" || true
+  fi
+
   case "$TOOL" in
     claude)
       tool_bin="$(require_tool_command "$TOOL" claude claude.cmd)" || return $?
@@ -87,6 +110,7 @@ run_selected_tool() {
       else
         command_args=("$tool_bin" --dangerously-skip-permissions --print --verbose --output-format stream-json)
       fi
+      command_args+=("${escalation_args[@]}")
       ;;
     codex)
       LAST_MESSAGE_FILE=$(mktemp)
@@ -98,17 +122,19 @@ run_selected_tool() {
           --config 'approval_policy="never"' \
           --skip-git-repo-check \
           --json \
-          --output-last-message "$LAST_MESSAGE_FILE" \
-          -)
+          --output-last-message "$LAST_MESSAGE_FILE")
       else
         command_args=("$tool_bin" exec \
           --cd "$run_cwd" \
           --dangerously-bypass-approvals-and-sandbox \
           --skip-git-repo-check \
           --json \
-          --output-last-message "$LAST_MESSAGE_FILE" \
-          -)
+          --output-last-message "$LAST_MESSAGE_FILE")
       fi
+      # `-` is codex's "take the prompt from stdin" positional and has to stay
+      # last: codex reads anything after it as a second positional, so escalation
+      # args appended at the end would silently stop being flags.
+      command_args+=("${escalation_args[@]}" -)
       ;;
     pi)
       tool_bin="$(require_tool_command "$TOOL" pi pi.cmd)" || return $?
@@ -123,6 +149,7 @@ run_selected_tool() {
       else
         command_args=("$tool_bin" --print --mode json --approve)
       fi
+      command_args+=("${escalation_args[@]}")
       ;;
     *)
       echo "Error: Ralph does not know how to run tool '$TOOL'." >&2
@@ -247,7 +274,7 @@ run_selected_tool() {
 
 # Most dedicated phases can retry a transient tool failure. Story rounds set
 # DEFER_TOOL_FAILURE_STOP because an incomplete story is handled immediately by
-# the final diagnosis round instead of another implementation attempt.
+# the diagnosis + recovery relay instead of another blind implementation round.
 record_tool_outcome() {
   local limit="${RALPH_MAX_CONSECUTIVE_FAILURES:-3}"
 

@@ -140,7 +140,7 @@ After completing a user story, check if ALL stories have `passes: true`.
 If ALL stories are complete and passing, reply with:
 <promise>COMPLETE</promise>
 
-If the current story remains `passes: false`, end with a clear blocker summary. Ralph will run one read-only failure diagnosis round and then stop for human review; it will not retry this implementation automatically. If the current story is complete but other stories remain, end normally so the next iteration can pick the next story.
+If the current story remains `passes: false`, end with a clear blocker summary. Ralph will run one read-only failure diagnosis round, then one escalated recovery round that receives the diagnosis report and makes the last automatic attempt at the story; if the story still fails after that, Ralph stops for human review. If the current story is complete but other stories remain, end normally so the next iteration can pick the next story.
 
 ## Important
 

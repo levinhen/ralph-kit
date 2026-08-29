@@ -1,9 +1,11 @@
 # Ralph Failure Diagnosis Round
 
 A normal Ralph implementation round has just ended, but its current story is
-still not marked `passes: true`. This is a dedicated, final diagnosis round.
-Ralph will stop after printing your response to the terminal; there will be no
-automatic implementation retry.
+still not marked `passes: true`. This is a dedicated, read-only diagnosis
+round. Your report is handed verbatim to a single escalated recovery round
+that makes the last automatic attempt at the story; if that round also fails,
+Ralph stops and shows both your report and the recovery round's closing
+message to the human.
 
 ## Read-Only Contract
 
@@ -27,8 +29,9 @@ automatic implementation retry.
    environment/tool failures, and genuinely missing human decisions.
 3. Cite concrete evidence: relevant files, commands, errors, Git state, or
    failed-round events. Be explicit when evidence is insufficient.
-4. Recommend the smallest useful next action for the human who will inspect the
-   terminal. Do not perform that action yourself.
+4. Recommend the smallest useful next action for the recovery round that runs
+   after you, concrete enough to execute directly; note anything only a human
+   can resolve. Do not perform that action yourself.
 
 ## Terminal Report
 
@@ -38,7 +41,7 @@ End with a concise, self-contained report using these headings:
 - `What failed`
 - `Likely root cause` (include confidence)
 - `Evidence`
-- `Recommended human action`
+- `Recommended next action`
 
 Use the language of the current story when it is clear; otherwise use concise
 English. Do not emit `<promise>COMPLETE</promise>`.

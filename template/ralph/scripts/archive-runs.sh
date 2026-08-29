@@ -64,45 +64,7 @@ if ! command -v jq >/dev/null 2>&1; then
   exit 1
 fi
 
-run_prd_all_passed() {
-  local prd_file="$1"
-
-  jq -e '
-    (.userStories | length) > 0
-    and (.userStories | all(.passes == true))
-  ' "$prd_file" >/dev/null 2>&1
-}
-
-run_merge_back_complete() {
-  local run_dir="$1"
-  local prd_file="$run_dir/prd.json"
-  local state_file="$run_dir/state.json"
-  local marker_file="$run_dir/.merge-back-done"
-  local target_branch
-  local base_branch
-
-  target_branch=$(jq -r '.branchName // empty' "$prd_file" 2>/dev/null || echo "")
-  base_branch=$(jq -r '.baseBranch // empty' "$state_file" 2>/dev/null || echo "")
-
-  if [[ -z "$target_branch" || -z "$base_branch" || "$target_branch" == "$base_branch" ]]; then
-    return 0
-  fi
-
-  if [[ -f "$marker_file" ]] \
-    && grep -qx "status=done" "$marker_file" \
-    && grep -qx "base_branch=$base_branch" "$marker_file" \
-    && grep -qx "target_branch=$target_branch" "$marker_file"; then
-    return 0
-  fi
-
-  if git -C "$REPO_ROOT" rev-parse --verify "$base_branch" >/dev/null 2>&1 \
-    && git -C "$REPO_ROOT" rev-parse --verify "$target_branch" >/dev/null 2>&1 \
-    && git -C "$REPO_ROOT" merge-base --is-ancestor "$target_branch" "$base_branch"; then
-    return 0
-  fi
-
-  return 1
-}
+source "$SCRIPT_DIR/lib/run-deps.sh"
 
 run_is_archivable() {
   local run_dir="$1"
@@ -113,7 +75,7 @@ run_is_archivable() {
     return 0
   fi
 
-  run_merge_back_complete "$run_dir"
+  run_merge_back_complete "$run_dir" "$REPO_ROOT"
 }
 
 lock_is_active() {

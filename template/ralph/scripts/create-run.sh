@@ -123,4 +123,14 @@ echo "  Progress: $PROGRESS_FILE"
 echo "  Progress dir: $PROGRESS_DIR"
 echo "  Shared memory: $SHARED_MEMORY_FILE"
 echo "  State: $STATE_FILE"
+
+# The run dir stays on disk when the lint fails: the PRD is what needs editing,
+# and ralph.sh would refuse to start on it anyway.
+if ! LINT_OUTPUT="$(bash "$SCRIPT_DIR/lint-prd.sh" --run "$RUN_ID" 2>&1)"; then
+  printf '%s\n' "$LINT_OUTPUT"
+  echo "Error: The new run's PRD failed validation: $TARGET_PRD"
+  echo "Fix it, then recheck with: $SCRIPT_DIR/lint-prd.sh --run $RUN_ID"
+  exit 1
+fi
+
 echo "Run with: $SCRIPT_DIR/ralph.sh --run $RUN_ID"

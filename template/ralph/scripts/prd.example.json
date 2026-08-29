@@ -2,6 +2,7 @@
   "project": "<your-project-name>",
   "branchName": "ralph/<feature-name-kebab-case>",
   "description": "<one-line feature description from your PRD>",
+  "dependsOnRuns": [],
   "userStories": [
     {
       "id": "US-001",
@@ -12,7 +13,21 @@
         "<verifiable criterion 2>",
         "Typecheck passes"
       ],
+      "dependsOn": [],
       "priority": 1,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-002",
+      "title": "<short story title>",
+      "description": "As a <user>, I want <capability> so that <benefit>.",
+      "acceptanceCriteria": [
+        "<verifiable criterion 1>",
+        "Typecheck passes"
+      ],
+      "dependsOn": ["US-001"],
+      "priority": 2,
       "passes": false,
       "notes": ""
     }

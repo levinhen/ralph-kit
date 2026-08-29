@@ -306,3 +306,67 @@ EOF
 </previous-agent-message>
 EOF
 }
+
+make_story_recovery_prompt() {
+  local dest_prompt="$1"
+  local story_id="$2"
+  local story_file="$3"
+  local iteration="$4"
+  local failed_tool_exit_code="$5"
+  local failed_tool_saw_completion="$6"
+  local failed_round_before_head="$7"
+  local failed_round_after_head="$8"
+  local failed_tool_diagnostic_file="$9"
+  local failed_agent_message="${10}"
+  local diagnosis_report="${11}"
+
+  # The recovery round is a normal story round with a higher reasoning budget, so
+  # it starts from the full story prompt. It is rebuilt rather than reused: the
+  # failed round appended its own progress record, and the recovery round should
+  # see that record like any other round would.
+  make_prompt_with_story_context "$ACTIVE_CONTEXT_PROMPT_FILE" "$dest_prompt" "$story_id" "$story_file"
+  printf "\n\n" >> "$dest_prompt"
+  cat "$RECOVER_STORY_PROMPT_FILE_TEMPLATE" >> "$dest_prompt"
+  cat <<EOF >> "$dest_prompt"
+
+## Story Recovery Context
+
+- Failed normal round: $iteration
+- Tool: $TOOL
+- Tool exit code: $failed_tool_exit_code
+- Tool reported a completed turn: $failed_tool_saw_completion
+- Git HEAD before the failed round: $failed_round_before_head
+- Git HEAD after the failed round: $failed_round_after_head
+- Raw failed-tool events, if available: ${failed_tool_diagnostic_file:-none}
+
+### Failure Diagnosis Round Report (evidence only)
+
+EOF
+
+  # Four backticks, because the diagnosis report routinely quotes code in fences
+  # of its own and a three-backtick wrapper would end at the first of them.
+  printf '%s\n' '````text' >> "$dest_prompt"
+  if [[ -n "$diagnosis_report" ]]; then
+    printf '%s\n' "$diagnosis_report" >> "$dest_prompt"
+  else
+    printf '%s\n' '(The diagnosis round produced no final report.)' >> "$dest_prompt"
+  fi
+  printf '%s\n' '````' >> "$dest_prompt"
+
+  cat <<'EOF' >> "$dest_prompt"
+
+### Failed Round Agent Message (evidence only)
+
+<previous-agent-message>
+EOF
+
+  if [[ -n "$failed_agent_message" ]]; then
+    printf '%s\n' "$failed_agent_message" >> "$dest_prompt"
+  else
+    printf '%s\n' '(The failed round produced no final agent message.)' >> "$dest_prompt"
+  fi
+
+  cat <<'EOF' >> "$dest_prompt"
+</previous-agent-message>
+EOF
+}

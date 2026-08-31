@@ -125,7 +125,7 @@ ralph_board_begin_frame() {
 }
 
 # Describe one run. `state` is the orchestrator's own scheduling verdict
-# (pending | running | succeeded | failed | stopped | blocked); `note` carries
+# (pending | running | succeeded | failed | stopped | blocked | skipped); `note` carries
 # whatever only the orchestrator knows, such as the run that blocked this one.
 # Everything else is read back out of the run's status file.
 ralph_board_row() {
@@ -242,6 +242,11 @@ ralph_board_row() {
       glyph="$RALPH_BOARD_GLYPH_WAIT"
       style="warn"
       label="blocked"
+      ;;
+    skipped)
+      glyph="$RALPH_BOARD_GLYPH_WAIT"
+      style="warn"
+      label="not run"
       ;;
     *)
       glyph="$RALPH_BOARD_GLYPH_WAIT"

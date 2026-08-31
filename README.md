@@ -270,11 +270,16 @@ Every round starts cold, so all memory is files:
 ### Running several runs: `orchestrate.sh`
 
 ```sh
-ralph/scripts/orchestrate.sh --tool claude                        # graph mode: schedules from dependsOnRuns
+ralph/scripts/orchestrate.sh --tool claude                        # pick a subset, then schedule it from dependsOnRuns
+ralph/scripts/orchestrate.sh --tool claude --only "1,3-5"         # same, without the interactive picker
 ralph/scripts/orchestrate.sh --tool claude --plan "1 > 2,3 > 4"   # manual staged plan
 ```
 
-With no `--plan`, the orchestrator reads `dependsOnRuns` across the incomplete runs and schedules the graph: every run whose dependencies have already merged back starts immediately, independent runs execute in parallel, a failed run blocks only its transitive downstream, and the closing summary lists succeeded / failed / blocked. `--graph` forces this mode even when no run declares an edge; `--dry-run` previews the waves without executing.
+**Nothing runs that you did not pick.** The orchestrator lists the incomplete runs; `--only` (or `RALPH_ONLY`) narrows them to a subset — numbers from that list, run ids, `2-4` ranges, `,` or space separated — and graph mode asks for the same thing interactively when `--only` was not given (an empty answer, or `all`, still takes everything). A stage plan is its own selection: the runs it does not name are skipped, as before.
+
+The order is then derived **inside that subset**. With no `--plan`, the orchestrator reads `dependsOnRuns` across the selected runs and schedules the graph: every run whose dependencies have already merged back starts immediately, independent runs execute in parallel, a failed run blocks only its transitive downstream, and the closing summary lists succeeded / failed / blocked. `--graph` forces this mode even when no run declares an edge; `--dry-run` previews the waves without executing.
+
+A selected run may depend on a run you left out. That run cannot honestly execute — its worktree is cut from a base branch without that work, and `ralph.sh` refuses exactly this at startup — so the orchestrator says so instead of launching it: named with its missing dependency before anything starts, again as `NOT RUN` while the graph executes, and once more under `Not runnable in this selection` in the summary. The reason travels downstream (whatever depended on it cannot run either), everything else in the selection still runs, and the exit code stays `0`. A `dependsOnRuns` id naming no run at all remains a hard error, as does a cycle; a selection where *nothing* can run exits `1` rather than reporting an empty success. Stage mode does not schedule around dependencies, so it prints the same gap as a heads-up and leaves the plan to you.
 
 `--plan "1 > 2,3 > 4"` keeps the manual staged plan: `,` = parallel within a stage, `>` = next stage, and a failed stage stops the orchestrator. In both modes parallel runs write to per-run log files, a rate-limited run stops everything, and per-run locks plus a per-base-branch merge lock keep parallel runs from stepping on each other.
 
@@ -298,6 +303,7 @@ With no `--plan`, the orchestrator reads `dependsOnRuns` across the incomplete r
 | `RALPH_PRICE_CACHE_WRITE_USD` / `RALPH_PRICE_OUTPUT_USD` | `6.25` / `30` | USD per 1M tokens, used to estimate codex cost (claude and pi report their own) |
 | `RALPH_PRICE_MODEL` | `gpt-5.6-sol` | model label shown next to an estimated cost |
 | `RALPH_NOTIFY` / `RALPH_NOTIFY_SOUND` | `1` | desktop notifications |
+| `--only "1,3-5"` / `RALPH_ONLY` | interactive picker (graph mode) | which incomplete runs `orchestrate.sh` may schedule |
 | `RALPH_PLAN` | — | default plan for `orchestrate.sh` |
 | `RALPH_IGNORE_RUN_DEPS` | `0` | `1` starts a run even when its `dependsOnRuns` have not merged back yet |
 | `RALPH_REQUIRE_DEPS_AUDIT` | `0` | `1` turns the advisory `deps-audit.json` warnings back into lint errors |

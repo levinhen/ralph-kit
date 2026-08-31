@@ -70,10 +70,11 @@ npm test
 - **The dependency fields have seven consumers.** `dependsOn` (story-level) and
   `dependsOnRuns` (run-level) are documented in the ralph skill, enforced by
   `lint-prd.sh`, gated at `ralph.sh` startup, scheduled from by
-  `orchestrate.sh` graph mode, described in both READMEs, rewritten by an
-  unblock round that restructures a blocked story, and — for `dependsOn` —
-  mirrored edge for edge in a run's `deps-audit.json` when it has one. A
-  semantic change to either field must visit all seven, or the lint will accept
+  `orchestrate.sh` graph mode (within this invocation's selection only),
+  described in both READMEs, rewritten by an unblock round that restructures a
+  blocked story, and — for `dependsOn` — mirrored edge for edge in a run's
+  `deps-audit.json` when it has one. A semantic change to either field must
+  visit all seven, or the lint will accept
   what the scheduler misreads (or vice versa).
 - **The dependency audit is advice, and nothing may turn it back into a gate.**
   `/ralph` may hand the finished split to a separate agent running
@@ -186,11 +187,34 @@ npm test
   `lib/story-phase.sh` executes story/unblock work and
   `lib/wrap-up-phases.sh` executes the wrap-up phases. Add a phase by extending
   that selector and its executor; do not recreate phase ordering in `ralph.sh`.
-- **The orchestrator has one process executor.** `lib/orchestrator-graph.sh` owns
-  dependency scheduling, `lib/orchestrator-stage.sh` owns explicit stage gates,
-  and both launch, reap, and terminate children only through
-  `lib/orchestrator-executor.sh`. Run discovery stays in `lib/runs.sh`; do not
-  add another directory scan to `orchestrate.sh`.
+- **The orchestrator has one process executor, and one selector.**
+  `lib/orchestrator-selection.sh` owns which of the discovered runs this
+  invocation may start — `--only` / `RALPH_ONLY`, graph mode's interactive
+  picker — and the one reading of `dependsOnRuns` both schedulers share
+  (`selection_run_deps`). It rewrites `INCOMPLETE_RUNS` / `TOTAL_RUNS` *before*
+  either scheduler runs, so those two keep meaning "the runs this invocation may
+  start" and no scheduler has to learn that a selection happened.
+  `lib/orchestrator-graph.sh` owns dependency scheduling,
+  `lib/orchestrator-stage.sh` owns explicit stage gates, and both launch, reap,
+  and terminate children only through `lib/orchestrator-executor.sh`. Run
+  discovery stays in `lib/runs.sh`; do not add another directory scan to
+  `orchestrate.sh`.
+- **An edge out of the selection is a report, not a refusal.** `graph_build`
+  sorts every `dependsOnRuns` entry into four buckets, and only the last is
+  fatal: an edge inside the selection, a dependency already merged back or
+  archived (dropped), a real run this invocation did not select, and an id
+  naming no run at all. The third bucket exists because a selection is a
+  legitimate choice, not a defect — but the dependent still cannot honestly run
+  (its worktree is cut from a base branch without that work, which is exactly
+  what `ralph_bootstrap_validate_backlog` refuses), so `graph_mark_unrunnable`
+  takes it and its downstream out of the schedule with the reason attached
+  instead of launching it into that gate. Say it three times — before the
+  confirmation, again as `NOT RUN` during execution, and in the summary's own
+  section — because a run that was quietly dropped reads exactly like a run that
+  succeeded. Those runs never move the exit code: the only reason the whole
+  invocation fails is that *nothing* in the selection could run. Stage mode
+  cannot schedule around this at all, so it prints the same gap through
+  `stage_warn_unmet_deps` as a warning and leaves the plan alone.
 
 ## Testing reality
 

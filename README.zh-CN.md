@@ -270,11 +270,16 @@ Ralph usage for this run:
 ### 多 run 编排：`orchestrate.sh`
 
 ```sh
-ralph/scripts/orchestrate.sh --tool claude                        # 图模式：按 dependsOnRuns 调度
+ralph/scripts/orchestrate.sh --tool claude                        # 先选范围，再按 dependsOnRuns 调度
+ralph/scripts/orchestrate.sh --tool claude --only "1,3-5"         # 同上，但不走交互式选择
 ralph/scripts/orchestrate.sh --tool claude --plan "1 > 2,3 > 4"   # 手工阶段计划
 ```
 
-不带 `--plan` 时，编排器读取各未完成 run 的 `dependsOnRuns` 并按依赖图调度：依赖已全部 merge 回基线的 run 立即启动，互相独立的 run 并行执行，某个 run 失败只会阻塞它的传递下游，收尾时汇总列出成功 / 失败 / 被阻塞三组。`--graph` 可在没有任何依赖声明时也强制图模式；`--dry-run` 只预览波次不执行。
+**没被你选中的 run 不会执行。** 编排器先列出所有未完成的 run；`--only`（或 `RALPH_ONLY`）把它们收窄成一个子集——可以写列表里的编号、run id、`2-4` 区间，用 `,` 或空格分隔——图模式在没给 `--only` 时会交互式地问同一件事（直接回车或输入 `all` 仍表示全选）。阶段计划本身就是一种选择：计划里没点名的 run 照旧跳过。
+
+排序随后**只在这个子集内部推导**。不带 `--plan` 时，编排器读取选中各 run 的 `dependsOnRuns` 并按依赖图调度：依赖已全部 merge 回基线的 run 立即启动，互相独立的 run 并行执行，某个 run 失败只会阻塞它的传递下游，收尾时汇总列出成功 / 失败 / 被阻塞三组。`--graph` 可在没有任何依赖声明时也强制图模式；`--dry-run` 只预览波次不执行。
+
+选中的 run 可能依赖一个你没选的 run。这个 run 没法诚实地执行——它的 worktree 从不含那份工作的基线分支切出，`ralph.sh` 启动时正是要拦这种情况——所以编排器不会硬启动它，而是把话说清楚：开跑前点名它缺哪个依赖，图执行过程中再以 `NOT RUN` 重述一次，最后在汇总里单列 `Not runnable in this selection`。这个原因会沿依赖链向下传递（依赖它的 run 同样跑不了），选中范围内的其余 run 照常执行，退出码仍是 `0`。`dependsOnRuns` 指向一个根本不存在的 run 依然是硬错误，成环也是；而如果整个选中范围里没有任何 run 可跑，则退出 `1`，而不是报一次空的成功。阶段模式不按依赖调度，因此它只把同样的缺口作为提醒打印出来，计划仍由你自己定。
 
 `--plan "1 > 2,3 > 4"` 保留手工阶段计划：`,` 表示同阶段并行，`>` 表示进入下一阶段，任一阶段失败即停止编排。两种模式下并行 run 的输出都写入各自的日志文件，命中限流会停止一切；run 级锁加基线分支级合并锁，保证并行 run 互不踩踏。
 
@@ -298,6 +303,7 @@ ralph/scripts/orchestrate.sh --tool claude --plan "1 > 2,3 > 4"   # 手工阶段
 | `RALPH_PRICE_CACHE_WRITE_USD` / `RALPH_PRICE_OUTPUT_USD` | `6.25` / `30` | 每百万 token 美元单价，用于估算 codex 成本（claude 与 pi 自报金额）|
 | `RALPH_PRICE_MODEL` | `gpt-5.6-sol` | 估算成本时显示的模型标签 |
 | `RALPH_NOTIFY` / `RALPH_NOTIFY_SOUND` | `1` | 桌面通知 |
+| `--only "1,3-5"` / `RALPH_ONLY` | 图模式下交互式询问 | `orchestrate.sh` 本次允许调度哪些未完成的 run |
 | `RALPH_PLAN` | — | `orchestrate.sh` 的默认计划 |
 | `RALPH_IGNORE_RUN_DEPS` | `0` | 设为 `1` 时，即使 `dependsOnRuns` 尚未 merge 回基线也照常启动 |
 | `RALPH_REQUIRE_DEPS_AUDIT` | `0` | 设为 `1` 时，把 `deps-audit.json` 的建议性警告重新升级为 lint 错误 |

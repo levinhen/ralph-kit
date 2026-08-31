@@ -9,20 +9,17 @@
 # purpose; the values are always integers.
 GRAPH_DEPS=()       # intra-graph dependency indices
 GRAPH_MET_DEPS=()   # dependency ids already merged back or archived (display)
+GRAPH_OUT_OF_SCOPE=()  # dependency ids that exist but were not selected
+GRAPH_SKIP_REASON=()   # why this run cannot run in this selection
 GRAPH_BLOCKER=()    # id of the failed ancestor that blocked this run
 GRAPH_WAVE=()       # topological wave, 0 until assigned
 
-# True when any incomplete run declares at least one `dependsOnRuns` entry. Such
+# True when any scheduled run declares at least one `dependsOnRuns` entry. Such
 # a run already carries the ordering a stage plan would only restate by hand.
 graph_edges_declared() {
-  local idx=0 run_id first_dep
+  local idx=0 first_dep
   while [[ $idx -lt $TOTAL_RUNS ]]; do
-    run_id="${INCOMPLETE_RUNS[$idx]}"
-    first_dep="$(jq -r '
-      (.dependsOnRuns // [])
-      | if type == "array" then .[] else empty end
-      | select(type == "string")
-    ' "$RUNS_ROOT/$run_id/prd.json" 2>/dev/null | head -1)"
+    first_dep="$(selection_run_deps "${INCOMPLETE_RUNS[$idx]}" | head -1)"
     if [[ -n "$first_dep" ]]; then
       return 0
     fi
@@ -44,10 +41,10 @@ graph_index_of_run() {
 }
 
 # Read `dependsOnRuns` for every scheduled run and sort each entry into one of
-# three buckets: an edge to another run scheduled here, a dependency that has
-# already landed (dropped - there is nothing left to wait for), or a reference
-# nothing can satisfy (fatal). Discovery already covers every run dir that is
-# not complete, so "neither scheduled nor satisfied" can only be a bad id.
+# four buckets: an edge to another run scheduled here, a dependency that has
+# already landed (dropped - there is nothing left to wait for), a real run this
+# invocation did not select (the dependent cannot run; see
+# graph_mark_unrunnable), or a reference naming nothing at all (fatal).
 graph_build() {
   local idx=0 run_id dep dep_idx seen bad=0
 
@@ -58,6 +55,8 @@ graph_build() {
     orchestrator_executor_add "$run_id"
     GRAPH_DEPS[$idx]=""
     GRAPH_MET_DEPS[$idx]=""
+    GRAPH_OUT_OF_SCOPE[$idx]=""
+    GRAPH_SKIP_REASON[$idx]=""
     GRAPH_BLOCKER[$idx]=""
     GRAPH_WAVE[$idx]=0
     seen=" "
@@ -73,15 +72,13 @@ graph_build() {
         GRAPH_DEPS[$idx]="${GRAPH_DEPS[$idx]} $dep_idx"
       elif run_dependency_satisfied "$RALPH_ROOT" "$REPO_ROOT" "$dep"; then
         GRAPH_MET_DEPS[$idx]="${GRAPH_MET_DEPS[$idx]} $dep"
+      elif run_dir_exists "$dep"; then
+        GRAPH_OUT_OF_SCOPE[$idx]="${GRAPH_OUT_OF_SCOPE[$idx]} $dep"
       else
-        echo "Error: run '$run_id' depends on '$dep', which is neither a run scheduled here nor a finished/archived run." >&2
+        echo "Error: run '$run_id' depends on '$dep', which is not a run at all - no ralph/runs/$dep/prd.json exists." >&2
         bad=1
       fi
-    done < <(jq -r '
-      (.dependsOnRuns // [])
-      | if type == "array" then .[] else empty end
-      | select(type == "string")
-    ' "$RUNS_ROOT/$run_id/prd.json" 2>/dev/null || true)
+    done < <(selection_run_deps "$run_id")
 
     idx=$((idx + 1))
   done
@@ -91,6 +88,57 @@ graph_build() {
     return 1
   fi
   return 0
+}
+
+# Take the runs this selection cannot honestly execute out of the schedule.
+#
+# A dependency left out of the selection is not a defect: the run exists and is
+# simply not being started here. But the dependent's worktree is cut from the
+# base branch, so it would not contain that work - ralph.sh refuses such a run
+# at startup, and launching it would only turn a scheduling choice into a
+# failed run. The reason is kept per run so the report can name it, and it
+# travels downstream: whatever depended on a run that cannot start cannot
+# start either.
+graph_mark_unrunnable() {
+  local idx dep changed=1
+
+  idx=0
+  while [[ $idx -lt $TOTAL_RUNS ]]; do
+    if [[ -n "${GRAPH_OUT_OF_SCOPE[$idx]}" ]]; then
+      ORCH_EXEC_STATES[$idx]="skipped"
+      GRAPH_SKIP_REASON[$idx]="needs${GRAPH_OUT_OF_SCOPE[$idx]}, not scheduled in this selection"
+    fi
+    idx=$((idx + 1))
+  done
+
+  while [[ "$changed" -eq 1 ]]; do
+    changed=0
+    idx=0
+    while [[ $idx -lt $TOTAL_RUNS ]]; do
+      if [[ "${ORCH_EXEC_STATES[$idx]}" == "pending" ]]; then
+        for dep in ${GRAPH_DEPS[$idx]}; do
+          if [[ "${ORCH_EXEC_STATES[$dep]}" == "skipped" ]]; then
+            ORCH_EXEC_STATES[$idx]="skipped"
+            GRAPH_SKIP_REASON[$idx]="needs ${INCOMPLETE_RUNS[$dep]}, which cannot run either"
+            changed=1
+            break
+          fi
+        done
+      fi
+      idx=$((idx + 1))
+    done
+  done
+}
+
+graph_skipped_count() {
+  local idx=0 count=0
+  while [[ $idx -lt $TOTAL_RUNS ]]; do
+    if [[ "${ORCH_EXEC_STATES[$idx]}" == "skipped" ]]; then
+      count=$((count + 1))
+    fi
+    idx=$((idx + 1))
+  done
+  printf '%s\n' "$count"
 }
 
 # Kahn peeling: each pass collects every unassigned run whose dependencies all
@@ -158,7 +206,9 @@ graph_show() {
         line="$line, ${INCOMPLETE_RUNS[$dep]}"
       fi
     done
-    if [[ -z "$line" ]]; then
+    if [[ -z "$line" && -n "${GRAPH_OUT_OF_SCOPE[$idx]}" ]]; then
+      printf "  %s  (no dependency scheduled here)\n" "${INCOMPLETE_RUNS[$idx]}"
+    elif [[ -z "$line" ]]; then
       printf "  %s  (waits for nothing)\n" "${INCOMPLETE_RUNS[$idx]}"
     else
       printf "  %s  <- %s\n" "${INCOMPLETE_RUNS[$idx]}" "$line"
@@ -166,8 +216,35 @@ graph_show() {
     if [[ -n "${GRAPH_MET_DEPS[$idx]}" ]]; then
       printf "      already merged back:%s\n" "${GRAPH_MET_DEPS[$idx]}"
     fi
+    if [[ -n "${GRAPH_OUT_OF_SCOPE[$idx]}" ]]; then
+      printf "      outside this selection:%s\n" "${GRAPH_OUT_OF_SCOPE[$idx]}"
+    fi
     idx=$((idx + 1))
   done
+}
+
+# The runs this selection takes off the table, said plainly and before anything
+# starts: a selection that quietly dropped a run would read as a run that
+# succeeded.
+graph_show_unrunnable() {
+  local idx=0 any=0
+
+  while [[ $idx -lt $TOTAL_RUNS ]]; do
+    if [[ "${ORCH_EXEC_STATES[$idx]}" == "skipped" ]]; then
+      if [[ "$any" -eq 0 ]]; then
+        echo ""
+        echo "Cannot run in this selection:"
+        any=1
+      fi
+      printf "  %s  -  %s\n" "${INCOMPLETE_RUNS[$idx]}" "${GRAPH_SKIP_REASON[$idx]}"
+    fi
+    idx=$((idx + 1))
+  done
+
+  [[ "$any" -eq 1 ]] || return 0
+  echo "  Their worktrees would be cut from a base branch without that work, so"
+  echo "  they are left untouched. Select the missing run too, or finish and merge"
+  echo "  it back first; everything else in the selection still runs."
 }
 
 graph_show_waves() {
@@ -187,7 +264,9 @@ graph_show_waves() {
     line=""
     idx=0
     while [[ $idx -lt $TOTAL_RUNS ]]; do
-      if [[ "${GRAPH_WAVE[$idx]}" -eq "$wave" ]]; then
+      # Unrunnable runs keep their topological wave (the cycle check needs it)
+      # but never appear in the preview: they are listed above instead.
+      if [[ "${GRAPH_WAVE[$idx]}" -eq "$wave" && "${ORCH_EXEC_STATES[$idx]}" != "skipped" ]]; then
         if [[ -z "$line" ]]; then
           line="${INCOMPLETE_RUNS[$idx]}"
         else
@@ -196,7 +275,9 @@ graph_show_waves() {
       fi
       idx=$((idx + 1))
     done
-    printf "  Wave %d:  %s\n" "$wave" "$line"
+    if [[ -n "$line" ]]; then
+      printf "  Wave %d:  %s\n" "$wave" "$line"
+    fi
     wave=$((wave + 1))
   done
 }
@@ -308,6 +389,7 @@ graph_render_board() {
       case "${ORCH_EXEC_STATES[$idx]}" in
         blocked) note="<- ${GRAPH_BLOCKER[$idx]}" ;;
         pending) note="$(graph_pending_note "$idx")" ;;
+        skipped) note="${GRAPH_SKIP_REASON[$idx]%%,*}" ;;
         failed | stopped) note="exit ${ORCH_EXEC_RCS[$idx]}" ;;
       esac
 
@@ -319,15 +401,30 @@ graph_render_board() {
   ralph_board_end_frame "$running" "$succeeded" "$failed"
 }
 
-# Returns 0 when every run succeeded, RALPH_RATE_LIMIT_EXIT_CODE on a rate
-# limit, and 1 when anything failed or was blocked.
+# Returns 0 when every runnable run succeeded, RALPH_RATE_LIMIT_EXIT_CODE on a
+# rate limit, and 1 when anything failed or was blocked. Runs the selection
+# cannot execute are reported, not counted as failures.
 graph_execute() {
-  local idx completed_idx rate_limited=0
+  local idx completed_idx rate_limited=0 skipped
+
+  skipped="$(graph_skipped_count)"
 
   echo ""
   echo "==============================================================="
-  echo "  Graph execution: $TOTAL_RUNS run(s)"
+  if [[ "$skipped" -gt 0 ]]; then
+    echo "  Graph execution: $((TOTAL_RUNS - skipped)) run(s), $skipped not runnable"
+  else
+    echo "  Graph execution: $TOTAL_RUNS run(s)"
+  fi
   echo "==============================================================="
+
+  idx=0
+  while [[ $idx -lt $TOTAL_RUNS ]]; do
+    if [[ "${ORCH_EXEC_STATES[$idx]}" == "skipped" ]]; then
+      echo "  [graph] ${INCOMPLETE_RUNS[$idx]}: NOT RUN (${GRAPH_SKIP_REASON[$idx]})"
+    fi
+    idx=$((idx + 1))
+  done
 
   orchestrator_executor_clear_status_files
   ralph_board_start "$STATUS_ROOT" "$TOTAL_RUNS"
@@ -380,9 +477,10 @@ graph_execute() {
   orchestrator_executor_forget_pids
   idx=0
   while [[ $idx -lt $TOTAL_RUNS ]]; do
-    if [[ "${ORCH_EXEC_STATES[$idx]}" != "succeeded" ]]; then
-      return 1
-    fi
+    case "${ORCH_EXEC_STATES[$idx]}" in
+      succeeded | skipped) ;;
+      *) return 1 ;;
+    esac
     idx=$((idx + 1))
   done
   return 0
@@ -444,15 +542,42 @@ graph_summary() {
     idx=$((idx + 1))
   done
   [[ "$any" -eq 1 ]] || echo "  (none)"
+
+  # Kept separate from Blocked: nothing went wrong with these runs, the
+  # selection just does not contain what they need.
+  any=0
+  idx=0
+  while [[ $idx -lt $TOTAL_RUNS ]]; do
+    if [[ "${ORCH_EXEC_STATES[$idx]}" == "skipped" ]]; then
+      if [[ "$any" -eq 0 ]]; then
+        echo "Not runnable in this selection:"
+        any=1
+      fi
+      echo "  - ${INCOMPLETE_RUNS[$idx]} (${GRAPH_SKIP_REASON[$idx]})"
+    fi
+    idx=$((idx + 1))
+  done
 }
 
 graph_main() {
-  local rc=0
+  local rc=0 skipped runnable
 
   graph_build || exit 1
   graph_assign_waves || exit 1
+  graph_mark_unrunnable
 
   graph_show
+  graph_show_unrunnable
+
+  skipped="$(graph_skipped_count)"
+  runnable=$((TOTAL_RUNS - skipped))
+
+  if [[ "$runnable" -eq 0 ]]; then
+    echo ""
+    echo "Nothing in this selection can run: every selected run depends on a run" >&2
+    echo "left out of it. Widen the selection, or finish those runs first." >&2
+    exit 1
+  fi
 
   if [[ "$DRY_RUN" == "true" ]]; then
     graph_show_waves
@@ -494,6 +619,10 @@ graph_main() {
     echo "Some runs failed or were blocked." >&2
     exit 1
   fi
-  echo "All $TOTAL_RUNS run(s) completed successfully."
+  if [[ "$skipped" -gt 0 ]]; then
+    echo "All $runnable runnable run(s) completed successfully; $skipped left unrun (see above)."
+  else
+    echo "All $TOTAL_RUNS run(s) completed successfully."
+  fi
   exit 0
 }

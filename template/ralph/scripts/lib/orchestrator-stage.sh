@@ -150,6 +150,48 @@ stage_show_plan() {
   fi
 }
 
+# A stage plan says nothing about `dependsOnRuns`, so a plan can order a run
+# ahead of something it needs, or leave that something out entirely. ralph.sh
+# refuses such a run at startup, which surfaces as a failed stage several
+# minutes in. Say it here instead - as a warning, not a gate: the plan is the
+# operator's call, and RALPH_IGNORE_RUN_DEPS is a legitimate answer.
+stage_warn_unmet_deps() {
+  local i=0 dep run_id any=0
+  local planned=" " stage_runs=()
+
+  while [[ $i -lt ${#PLAN_STAGES[@]} ]]; do
+    planned="$planned${PLAN_STAGES[$i]} "
+    i=$((i + 1))
+  done
+
+  i=0
+  while [[ $i -lt ${#PLAN_STAGES[@]} ]]; do
+    stage_runs=()
+    read -ra stage_runs <<< "${PLAN_STAGES[$i]}"
+    for run_id in "${stage_runs[@]}"; do
+      while IFS= read -r dep; do
+        [[ -n "$dep" ]] || continue
+        case "$planned" in
+          *" $dep "*) continue ;;
+        esac
+        run_dependency_satisfied "$RALPH_ROOT" "$REPO_ROOT" "$dep" && continue
+        if [[ "$any" -eq 0 ]]; then
+          echo ""
+          echo "Heads-up: this plan does not schedule everything it depends on:"
+          any=1
+        fi
+        printf "  %s needs %s\n" "$run_id" "$dep"
+      done < <(selection_run_deps "$run_id")
+    done
+    i=$((i + 1))
+  done
+
+  [[ "$any" -eq 1 ]] || return 0
+  echo "  Ralph refuses to start a run whose dependsOnRuns have not merged back,"
+  echo "  so those stages will fail unless you add the missing runs to the plan"
+  echo "  (or set RALPH_IGNORE_RUN_DEPS=1). Graph mode schedules this for you."
+}
+
 stage_confirm() {
   if [[ "$DRY_RUN" == "true" ]]; then
     echo ""
@@ -339,6 +381,7 @@ stage_main() {
   stage_read_plan
   stage_parse_plan
   stage_show_plan
+  stage_warn_unmet_deps
   stage_confirm
   stage_execute_plan
 }

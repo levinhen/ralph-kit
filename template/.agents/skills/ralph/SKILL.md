@@ -573,6 +573,11 @@ merged back (or archived), runs independent runs in parallel, and blocks a run's
 runs are archived by the consolidation round or `archive-runs.sh`, so the runs directory stays a worklist of what is
 still in play.
 
+Scheduling happens inside the subset the operator selected for that invocation (`--only`, or the interactive picker),
+not across the whole directory. A selected run whose `dependsOnRuns` names a run left out of the selection is reported
+as unrunnable and left alone rather than started — one more reason an edge has to be real work this run cannot see,
+never sequencing comfort.
+
 ---
 
 ## Example

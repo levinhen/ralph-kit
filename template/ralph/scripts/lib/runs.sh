@@ -13,6 +13,12 @@ run_is_complete() {
   run_prd_all_passed "$prd_file" && run_merge_back_complete "$run_dir" "$REPO_ROOT"
 }
 
+# A run directory that exists, whether or not this invocation scheduled it.
+# Separates "a run you left out of the selection" from "an id naming nothing".
+run_dir_exists() {
+  [[ -f "$RUNS_ROOT/$1/prd.json" ]]
+}
+
 any_run_exists() {
   [[ -d "$RUNS_ROOT" ]] \
     && find "$RUNS_ROOT" -mindepth 2 -maxdepth 2 -type f -name prd.json -print -quit | grep -q .

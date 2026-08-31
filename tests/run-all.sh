@@ -26,6 +26,7 @@ TESTS=(
   orchestrator-stage-gate.sh
   lint-prd.sh
   orchestrator-graph.sh
+  orchestrator-selection.sh
   archive-collision.sh
   scoped-lifecycle.sh
   scoped-no-merge-lifecycle.sh

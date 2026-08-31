@@ -55,10 +55,17 @@ done
 assert_absent "$SCRIPTS_DIR/orchestrate.sh" 'RUNS_ROOT="$RALPH_ROOT/runs"'
 assert_absent "$SCRIPTS_DIR/archive-runs.sh" 'RUNS_ROOT="$RALPH_ROOT/runs"'
 
-for module in orchestrator-executor orchestrator-graph orchestrator-stage; do
+for module in orchestrator-selection orchestrator-executor orchestrator-graph orchestrator-stage; do
   assert_contains "$SCRIPTS_DIR/orchestrate.sh" ". \"\$SCRIPT_DIR/lib/$module.sh\""
 done
 assert_contains "$SCRIPTS_DIR/orchestrate.sh" 'ralph_tool_validate "$TOOL"'
+
+# Both schedulers read dependsOnRuns through the selection module, so "an edge
+# out of this invocation's scope" means the same thing in either mode.
+for scheduler in orchestrator-graph orchestrator-stage; do
+  assert_contains "$SCRIPTS_DIR/lib/$scheduler.sh" 'selection_run_deps'
+  assert_absent "$SCRIPTS_DIR/lib/$scheduler.sh" '.dependsOnRuns // []'
+done
 
 # Persistence is independently reusable; only run-observers may couple it to
 # the optional terminal projection.

@@ -2,8 +2,19 @@
 # Ralph Orchestrator - Run multiple Ralph runs in stages or as a dependency graph.
 #
 # Usage:
-#   ./orchestrate.sh [--tool claude|codex|pi] [--plan "1 > 2,3 > 4" | --graph]
-#                    [--dry-run]
+#   ./orchestrate.sh [--tool claude|codex|pi] [--only "1,3-5"]
+#                    [--plan "1 > 2,3 > 4" | --graph] [--dry-run]
+#
+# Selection:
+#   Nothing is scheduled that you did not pick. --only (or RALPH_ONLY) narrows
+#   the incomplete runs to a subset - numbers from the printed list, run ids,
+#   '2-4' ranges, ',' or space separated - and graph mode asks for the same
+#   thing interactively when --only was not given. A stage plan is its own
+#   selection: the runs it does not name are skipped, as before.
+#   The order is then derived inside that subset only. A run whose
+#   `dependsOnRuns` names something left out of the selection cannot honestly
+#   run - its worktree would not contain that work - so graph mode reports it
+#   as unrunnable, by name and with the reason, and runs everything else.
 #
 # Modes:
 #   stage  A hand-typed plan orders the runs (--plan / RALPH_PLAN, or the
@@ -32,9 +43,12 @@
 #     stages stream directly to the terminal.
 #
 # Behavior (graph mode):
-#   - Nodes are the incomplete runs; edges come from each run's `dependsOnRuns`.
+#   - Nodes are the selected runs; edges come from each run's `dependsOnRuns`.
 #     A dependency that already finished and merged back (or was archived) is
-#     dropped. A dependency naming no known run is a hard error, as is a cycle.
+#     dropped. A dependency on a real run that this invocation did not select
+#     takes the dependent (and its own downstream) out of the schedule, listed
+#     with the reason. A dependency naming no known run at all is a hard error,
+#     as is a cycle.
 #   - Scheduling is event-driven, not wave-locked: every run whose graph
 #     dependencies have succeeded starts immediately, so a run never waits on
 #     an unrelated sibling. Every run logs to its own file.
@@ -51,6 +65,7 @@
 #
 # Environment:
 #   RALPH_PLAN     Default plan string (overridden by --plan, ignored by --graph).
+#   RALPH_ONLY     Default selection string (overridden by --only).
 #   RALPH_NOTIFY=0 Disable Ralph's per-run desktop notifications.
 #   RALPH_BOARD=0  Disable the status board.
 
@@ -58,6 +73,7 @@ set -e
 
 TOOL="${RALPH_TOOL:-codex}"
 PLAN_INPUT="${RALPH_PLAN:-}"
+ONLY_INPUT="${RALPH_ONLY:-}"
 PLAN_FROM_FLAG="false"
 GRAPH_FLAG="false"
 DRY_RUN="false"
@@ -83,6 +99,14 @@ while [[ $# -gt 0 ]]; do
       PLAN_FROM_FLAG="true"
       shift
       ;;
+    --only)
+      ONLY_INPUT="$2"
+      shift 2
+      ;;
+    --only=*)
+      ONLY_INPUT="${1#*=}"
+      shift
+      ;;
     --graph)
       GRAPH_FLAG="true"
       shift
@@ -92,7 +116,7 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     -h|--help)
-      sed -n '2,55p' "$0" | sed 's/^# \{0,1\}//'
+      sed -n '2,70p' "$0" | sed 's/^# \{0,1\}//'
       exit 0
       ;;
     *)
@@ -144,6 +168,9 @@ fi
 # Child-process lifecycle shared by both scheduling modes.
 # shellcheck source=lib/orchestrator-executor.sh
 . "$SCRIPT_DIR/lib/orchestrator-executor.sh"
+# Which runs this invocation may start, and how an edge out of that set reads.
+# shellcheck source=lib/orchestrator-selection.sh
+. "$SCRIPT_DIR/lib/orchestrator-selection.sh"
 # Mode-specific planning and scheduling.
 # shellcheck source=lib/orchestrator-graph.sh
 . "$SCRIPT_DIR/lib/orchestrator-graph.sh"
@@ -169,6 +196,10 @@ while [[ $i -lt $TOTAL_RUNS ]]; do
 done
 echo ""
 
+# An explicit selection narrows the list before the mode is chosen, so a plan's
+# numbers keep addressing exactly what was printed last.
+selection_apply_spec "$ONLY_INPUT" || exit 1
+
 MODE="stage"
 if [[ -n "$PLAN_INPUT" ]]; then
   MODE="stage"
@@ -177,6 +208,12 @@ elif [[ "$GRAPH_FLAG" == "true" ]]; then
 elif graph_edges_declared; then
   MODE="graph"
   echo "Found dependsOnRuns edges: scheduling as a dependency graph (no --plan given)."
+fi
+
+# A stage plan already says which runs to touch; graph mode has no such input,
+# so it asks rather than assuming the whole backlog.
+if [[ "$MODE" == "graph" && -z "$ONLY_INPUT" ]]; then
+  selection_prompt || exit 1
 fi
 
 cleanup_on_signal() {

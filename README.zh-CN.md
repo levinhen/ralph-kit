@@ -135,7 +135,7 @@ ralph/scripts/ralph.sh --run <run_id> --tool claude 20   # 或 --tool codex（�
    - **仅当前故事的 JSON**（并明确告知 agent 不要去读完整 PRD）；
    - **记忆切片**：最近约 40 条 shared-memory 条目 + 该故事最近约 5 条进度记录。
 3. 在 worktree 里启动一个**全新的 agent 进程**（`claude --print …`、`codex exec …` 或 `pi --print --mode json …`，跳过权限确认——本循环就是为无人值守设计的）。没有聊天历史，没有上一轮的上下文。
-4. agent 按手册行事：只实现**这一个故事**（只做 `Covers:` 指明的那一块），跑项目的质量检查（typecheck/lint/测试），把故事文件改为 `passes: true` 并写下 `notes`，用 `append-progress-json.sh` 追加结构化进度记录（一行 JSON 写进 `progress/<story_id>.jsonl`，可选 `--shared-memory` 沉淀可复用模式），最后以 `feat: [US-xxx] - [标题]` 提交全部变更。
+4. agent 按手册行事：只实现**这一个故事**（只做 `Covers:` 指明的那一块），跑覆盖本次改动的质量检查（typecheck 加这一块的测试，而不是每轮重跑全量套件），把故事文件改为 `passes: true` 并写下 `notes`，用 `append-progress-json.sh` 追加结构化进度记录（一行 JSON 写进 `progress/<story_id>.jsonl`，可选 `--shared-memory` 沉淀可复用模式），最后以 `feat: [US-xxx] - [标题]` 提交全部变更。
    每个 agent 回合都会收到统一的 **Round Commit Contract**：本轮产生的所有预期仓库产物必须在本轮结束前提交，不能留给后续 story、finalization、merge-back 或 consolidation 代为提交；若只形成了安全且完整的阶段性成果，则提交 checkpoint，但仍保持故事未完成。运行时 marker、临时诊断文件和无产物的幂等重试不要求空提交。
 5. 循环把故事状态同步回 `prd.json`（安全时 amend 进故事提交），并且**只认文件**。当前故事变为 `passes: true` 才正常进入下一故事；只要仍是 `passes != true`，无论 agent 口头上如何声明，都不会再重跑实现轮。
 6. 未完成的故事只会额外触发一次**故事疏通轮**（`UNBLOCK_STORY.md`）。它会拿到当前故事、近期进度、前后 Git HEAD、上一轮 agent 消息，以及可用时的原始失败事件——但它不是一次重试。在写任何代码之前，它先回答一个问题：这个故事是**真的被阻塞**了，还是上一轮只是没做完？

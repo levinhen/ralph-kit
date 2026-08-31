@@ -13,7 +13,7 @@ All user stories in the Ralph branch are already complete. Do not pick another u
 5. Do not abort the merge, rebase, cherry-pick, squash, or manually port the full branch as a separate single-parent commit.
 6. Include the completed Ralph state files that should live on the base branch, especially the PRD and progress paths supplied in `Ralph Run Context`.
 7. Do not stage unrelated pre-existing base worktree files unless they are intentionally part of the Ralph merge-back. Keep unrelated local files visible in the worktree and mention them if they remain after the merge commit.
-8. Run the appropriate quality checks for the files you changed.
+8. Run the quality checks over the merged result. This is the round that earns the full suite: story rounds ran checks scoped to their own slice, so run the project's whole test suite here — one-shot, never a watch mode — and resolve what it turns up before committing.
 9. Append the required `MERGE-BACK` progress entry, stage every intended artifact produced by this round, and complete the merge with `git commit`, preserving the active merge parents. The progress entry and all merge resolutions from this round must be included in that merge commit; do not leave them for consolidation or a later retry to commit.
 10. Write the merge completion marker only after the merge commit succeeds, and do not include that marker file in the commit.
 

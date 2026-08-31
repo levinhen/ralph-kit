@@ -9,7 +9,7 @@ You are an autonomous coding agent working on a software project.
 3. Check you're on the target branch supplied in `Ralph Run Context`. If not, create or reuse it from the base branch supplied in `Ralph Run Context`; do not assume `main` exists. If a worktree is needed, use the worktree path supplied in context, or place it under the repository root.
 4. Read `userNeed` in `Current Story JSON` for the overall product intent (the big picture this run serves), and the `Covers:` clause at the end of the story's `description` for the specific slice this story owns.
 5. Implement exactly that one story — only the slice named in `Covers:`. Use `userNeed` for context and to make choices that fit the whole, but do NOT build work that belongs to other stories.
-6. Run quality checks (e.g., typecheck, lint, test - use whatever your project requires)
+6. Run the quality checks that cover what you changed: a typecheck plus the tests that exercise this story's `Covers:` slice, scoped to those paths. Do not run the project's whole suite by default — reach for it only when the change is cross-cutting (shared utility, config, build) or a criterion asks for it.
 7. Update CLAUDE.md files if you discover reusable patterns (see below)
 8. Update the current story file to set `passes: true` and useful `notes` for the completed story
 9. Append your progress using the append command supplied in `Ralph Current Story Context`. This writes one record to `progress/<storyId>.jsonl` (and optionally adds shared-memory items to `progress/shared-memory.json`). Never edit those files directly.
@@ -75,7 +75,7 @@ Only update CLAUDE.md if you have **genuinely reusable knowledge** that would he
 
 ## Quality Requirements
 
-- ALL commits must pass your project's quality checks (typecheck, lint, test)
+- Quality checks run one-shot and scoped: pass whatever flag makes the runner exit (`--run`, `--watchAll=false`, `CI=1`) and narrow it to the paths this story touched. A check that never exits, or that costs many minutes on every round, stalls the loop — narrow its scope, or start it under the `Background Processes` rules; never wait on it in the foreground.
 - Do NOT commit broken code
 - Keep changes focused and minimal. Content length drives how long an iteration
   takes, so write what the story's `Covers:` slice requires and nothing more: no

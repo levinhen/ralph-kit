@@ -10,7 +10,7 @@ You are Codex running as an autonomous coding agent inside this repository.
 4. Check you are on the target branch supplied in `Ralph Run Context`. If not, create or reuse that branch from the base branch supplied in `Ralph Run Context`; do not assume `main` exists. If a worktree is needed, use the worktree path supplied in context, or place it under the repository root.
 5. Read `userNeed` in `Current Story JSON` for the overall product intent and the `Covers:` clause at the end of the story's `description` for the slice this story owns. Implement exactly that one story — only the `Covers:` slice; use `userNeed` for context to fit the whole, but do not build work that belongs to other stories.
 6. Modify only that story's JSON file for story status updates.
-7. Run the appropriate quality checks for the code you changed.
+7. Run the quality checks that cover what you changed: a typecheck plus the tests that exercise this story's `Covers:` slice, scoped to those paths. Do not run the project's whole suite by default — reach for it only when the change is cross-cutting (shared utility, config, build) or a criterion asks for it.
 8. Update nearby `CLAUDE.md` files if you discover reusable patterns worth preserving.
 9. Update the current story file to set `passes: true` and useful `notes` for the completed story.
 10. Append a structured progress record using the append command supplied in `Ralph Current Story Context`. This writes one compact line to `progress/<storyId>.jsonl` and, when `--shared-memory` is given, merges entries into `progress/shared-memory.json`. Never edit those files directly.
@@ -66,6 +66,7 @@ Do not add temporary notes, debugging leftovers, or story-specific implementatio
 
 - Keep changes focused and minimal.
 - Follow the existing code style and architecture.
+- Quality checks run one-shot and scoped: pass whatever flag makes the runner exit (`--run`, `--watchAll=false`, `CI=1`) and narrow it to the paths this story touched. A check that never exits, or that costs many minutes on every round, stalls the loop — narrow its scope, or start it under the `Background Processes` rules; never wait on it in the foreground.
 - Do not commit broken code.
 - If a platform-specific check cannot run on this machine, say so in the progress log.
 

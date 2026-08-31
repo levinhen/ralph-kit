@@ -286,7 +286,7 @@ Each criterion must be something Ralph can CHECK, not something vague.
 - "Filter dropdown has options: All, Active, Completed"
 - "Clicking delete shows confirmation dialog"
 - "Typecheck passes"
-- "Tests pass"
+- "Tests pass for src/tasks/filter"
 
 ### Bad criteria (vague):
 
@@ -302,11 +302,20 @@ Each criterion must be something Ralph can CHECK, not something vague.
 "Typecheck passes"
 ```
 
-For stories with testable logic, also include:
+For stories with testable logic, also include a **scoped** test criterion that names what runs:
 
 ```
-"Tests pass"
+"Tests pass for src/tasks/filter"
 ```
+
+Never put a whole-suite criterion (`"The test suite passes"`, `"npm test passes"`) on every story. A round only
+touched one slice, so the other 95% of the suite re-runs to prove nothing — and in a project whose suite takes three
+or four minutes, ten stories running it once or twice each burn an hour of wall clock per run. Scope every test
+criterion to the paths the story owns.
+
+The full suite belongs on **at most one story per run**: a final integration story, or the one story whose change is
+genuinely cross-cutting (shared utility, config, build). If the project has no way to run a subset of its tests, say
+so in that story's criterion and keep the full-suite line off the others.
 
 ### For stories that change UI, also include:
 
@@ -487,7 +496,8 @@ started with.
 8. **branchName**: Derive a Ralph execution branch from the current local git branch context, using a feature-specific
    kebab-case suffix prefixed with `ralph/`. This branch is meant to be created from the repository's current
    checked-out local branch, not from an assumed default branch.
-9. **Always add**: "Typecheck passes" to every story's acceptance criteria
+9. **Always add**: "Typecheck passes" to every story's acceptance criteria. That is the only blanket criterion —
+   test criteria name the story's own paths, and the full suite appears on at most one story in the run.
 10. **dependsOn**: Every story lists its real build **and verification** dependencies by story id. Dependencies may
     only point at earlier array entries. Omit or leave `[]` for genuinely independent stories — do not fabricate a
     linear chain.
@@ -711,6 +721,7 @@ Before writing run-scoped `prd.json`, verify:
 - [ ] Each story is completable in one iteration (small enough)
 - [ ] Stories are ordered by dependency (schema to backend to UI)
 - [ ] Every story has "Typecheck passes" as criterion
+- [ ] Test criteria name the story's own paths; at most one story carries a full-suite run
 - [ ] UI stories have a "Verified in a browser: ..." criterion naming what to look at, with no tool or skill name in it
 - [ ] Acceptance criteria are verifiable (not vague)
 - [ ] No story depends on a later story

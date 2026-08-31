@@ -85,6 +85,14 @@ Only update CLAUDE.md if you have **genuinely reusable knowledge** that would he
 - Follow existing code patterns
 - During merge-back rounds, if your project uses ordered/numbered migration files (e.g., timestamped SQL migrations), check for filename collisions against the base branch and renumber newly merged migrations to unique later versions before committing.
 
+## Scaffolding You Leave Behind
+
+You build one slice while the rest of the run does not exist yet, so some propping is legitimate: a stub for a dependency that lands two stories later, a fixture that lets you see your slice work, a temporary probe. Ralph runs a dedicated **scaffold cleanup round** once every story passes, and that round removes this run's propping before anything merges back. Work with it:
+
+- **Declare what you propped up.** For each piece of scaffolding this round leaves in the tree, add one line to `learnings.context` in the progress record, in the form `scaffold: <what> - <why>`. That list is what the cleanup round works from; anything you leave undeclared it has to rediscover from the diff.
+- **Do not clean up after other stories.** You only see your own slice, and a prop that looks dead from here may be the only thing holding up a story that has not run yet.
+- **Do not hide real tests behind a per-story command.** A `test:us022core`-style script is a fine shortcut while you work, but the assertions worth keeping belong in the project's normal test layout, reachable by the project's ordinary test command. A test that only ever runs from a story-shaped script is a test that stops running the moment that script goes away.
+
 ## Background Processes
 
 When you need to start a long-running server or watcher for verification, such as `npm run dev`, `vite`, `next dev`, or a file watcher:
@@ -139,6 +147,8 @@ After completing a user story, check if ALL stories have `passes: true`.
 
 If ALL stories are complete and passing, reply with:
 <promise>COMPLETE</promise>
+
+Completion hands the branch to the wrap-up rounds rather than straight to a merge: Ralph runs the scaffold cleanup round that strips this run's per-story propping, then merge-back, then consolidation. Leave the propping in place for that round to remove - declared, as above - instead of tearing it out here.
 
 If the current story remains `passes: false`, end with a clear blocker summary. Ralph will run one story unblock round, which first decides whether the story is genuinely blocked or was merely unfinished: if it was unfinished it is completed there; if it is genuinely blocked - its acceptance criteria cannot be satisfied from inside it, because the observation point, the verification setup, or a dependency belongs to another story - that round restructures the run's PRD (splitting, reordering, adding a prerequisite, or adding the missing `dependsOn` edges) and the loop continues on the new split. Ralph stops for human review only when neither is possible. If the current story is complete but other stories remain, end normally so the next iteration can pick the next story.
 

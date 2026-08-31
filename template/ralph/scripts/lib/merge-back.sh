@@ -21,6 +21,8 @@ target_worktree_status() {
     ':(exclude)ralph/locks' \
     ':(exclude)ralph/.merge-back-done' \
     ':(exclude)ralph/runs/*/.merge-back-done' \
+    ':(exclude)ralph/.scaffold-cleanup-done' \
+    ':(exclude)ralph/runs/*/.scaffold-cleanup-done' \
     ':(exclude)ralph/.consolidation-done-*'
 }
 
@@ -89,6 +91,8 @@ base_merge_status() {
     ':(exclude)ralph/locks' \
     ':(exclude)ralph/.merge-back-done' \
     ':(exclude)ralph/runs/*/.merge-back-done' \
+    ':(exclude)ralph/.scaffold-cleanup-done' \
+    ':(exclude)ralph/runs/*/.scaffold-cleanup-done' \
     ':(exclude)ralph/.consolidation-done-*' \
     ':(exclude)ralph/scripts/ralph.sh' \
     ':(exclude)ralph/scripts/lib' \

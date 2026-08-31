@@ -10,6 +10,7 @@ _RALPH_OVERLAY_EXCLUDES=(
   ':(exclude)ralph/archive'
   ':(exclude)ralph/.last-branch'
   ':(exclude)ralph/.merge-back-done'
+  ':(exclude)ralph/.scaffold-cleanup-done'
   ':(exclude)ralph/.consolidation-done-*'
   ':(exclude)ralph/prd.json'
   ':(exclude)ralph/progress.txt'

@@ -93,7 +93,8 @@ npm test
   escape sequence into an `echo` directly: `orchestrate.sh` redirects each
   parallel run to a log file and the tests capture stdout, and both must keep
   reading as plain text. The hues are semantic, not decorative — cyan story
-  round, yellow unblock round, magenta merge-back, blue consolidation, green
+  round, yellow unblock round, magenta handing the branch back (scaffold
+  cleanup, worktree finalization, merge-back), blue consolidation, green
   finished, red stopping — and the unblock yellow is deliberately the same
   warning colour `lib/progress-bar.sh` paints the pinned row with for that
   phase. Changing one without the other makes the row and the banner disagree
@@ -132,6 +133,36 @@ npm test
   `Stop Condition` sections and both READMEs state this sequence; changing the
   flow in `ralph.sh` without updating those texts leaves agents being promised a
   flow that no longer runs.
+- **The scaffold cleanup round deletes propping, never requirements.** After the
+  last story passes and before anything is finalized or merged back, one round
+  runs `CLEANUP_SCAFFOLD.md` in the Ralph worktree and strips what the story
+  rounds built to prove their own slices: per-story entry points
+  (`test:us022core`), self-verification fixtures and demo routes, debug probes,
+  bridges the real implementation has since replaced. It exists because no story
+  round can do this — each one only ever sees its own slice — and it is bounded
+  like the other wrap-up rounds, by a marker file (`.scaffold-cleanup-done`) and
+  a retry budget (`RALPH_MAX_CLEANUP_ROUNDS`).
+  Its boundary is the exact mirror of the unblock round's: that round may not
+  edit a failing story into a passing one, and this one may not delete a passing
+  story's substance. It touches no `passes` flag, no acceptance criterion, no
+  `Covers:` clause, and anything a criterion still rests on is not scaffolding
+  by definition. The trap worth keeping explicit in the prompt is the real test
+  wearing a scaffold's name: removing `test:us022core` without first getting its
+  assertions adopted by the project's ordinary test command silently drops them
+  from every future run. "Re-point, don't delete" is what stands between this
+  round and a quietly shrinking suite.
+  The round is described in the two READMEs, in `CLEANUP_SCAFFOLD.md`, and in
+  each playbook's `Scaffolding You Leave Behind` section — which is also the
+  round's input side: story rounds are asked to declare what they propped up as
+  `scaffold: <what> - <why>` in the progress record's `learnings.context`.
+  Change that declaration format in one place and the cleanup round is back to
+  rediscovering everything from the diff.
+  The marker has six consumers: `ralph.sh` (path + check),
+  `lib/scaffold-cleanup.sh` (the predicates), `lib/merge-back.sh` (excluded from
+  both worktree status functions), `lib/sync.sh` (excluded from the overlay),
+  `lib/consolidate.sh` (deleted on archive), and `bin/ralph-kit.mjs` (a
+  protected install path). A new marker path has to visit all six or it ends up
+  in somebody's commit.
 - **A blocked story is a decomposition defect, not a harder story.** The unblock
   round may only restructure when it can name something the criteria require
   that the story itself is not the one to create — a later observation point, a

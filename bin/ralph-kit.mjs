@@ -33,6 +33,7 @@ const PROTECTED_TARGET_PATHS = [
   'ralph/state.json',
   'ralph/.last-branch',
   'ralph/.merge-back-done',
+  'ralph/.scaffold-cleanup-done',
 ];
 
 const isWin = process.platform === 'win32';
@@ -339,7 +340,7 @@ Usage:
 Protected paths (never touched by init or sync):
   ralph/tasks/, ralph/runs/, ralph/archive/, ralph/locks/, ralph/progress/,
   ralph/stories/, and these files at ralph/: prd.json, progress.txt,
-  state.json, .last-branch, .merge-back-done.
+  state.json, .last-branch, .merge-back-done, .scaffold-cleanup-done.
 
 Source: https://github.com/levinhen/ralph-kit
 Derived from https://github.com/snarktank/ralph (MIT).

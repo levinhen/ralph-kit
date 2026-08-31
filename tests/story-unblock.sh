@@ -100,7 +100,15 @@ restructure_backlog() {
   printf 'x\n' >> "$FAKE_CODEX_RESTRUCTURE_FILE"
 }
 
-if grep -q 'Ralph Story Unblock Round' "$prompt_file"; then
+# The scaffold cleanup round is recognised the way a real agent would recognise
+# it - by the prompt it was handed - and satisfied the way a real one has to be:
+# by writing the marker file the loop actually trusts.
+if grep -q '^## Scaffold Cleanup Context' "$prompt_file"; then
+  cleanup_marker=$(grep -m1 '^- Cleanup marker' "$prompt_file" | sed 's/.*`\(.*\)`.*/\1/')
+  cleanup_run_id=$(grep -m1 '^- Run ID: ' "$prompt_file" | sed 's/.*`\(.*\)`.*/\1/')
+  printf 'status=done\nrun_id=%s\n' "$cleanup_run_id" > "$cleanup_marker"
+  message="Removed the run's per-story scaffolding."
+elif grep -q 'Ralph Story Unblock Round' "$prompt_file"; then
   case "$FAKE_CODEX_UNBLOCK_MODE" in
     finish)
       pass_current_story
@@ -224,8 +232,8 @@ if [[ "$RUN_STATUS" -ne 0 ]]; then
   fail "Expected Ralph to finish the run after the unblock round completed the story, got $RUN_STATUS"
 fi
 
-if [[ "$(cat "$COUNT_FILE")" -ne 2 ]]; then
-  fail "Expected exactly one implementation call and one unblock call, got $(cat "$COUNT_FILE")"
+if [[ "$(cat "$COUNT_FILE")" -ne 3 ]]; then
+  fail "Expected an implementation call, an unblock call and the scaffold cleanup round, got $(cat "$COUNT_FILE")"
 fi
 
 # One round, not a diagnosis/recovery relay: the second call already has write
@@ -272,9 +280,10 @@ if [[ "$RUN_STATUS" -ne 0 ]]; then
   fail "Expected Ralph to finish the run on the restructured split, got $RUN_STATUS"
 fi
 
-# implementation, unblock/restructure, then one round per story on the new split.
-if [[ "$(cat "$COUNT_FILE")" -ne 4 ]]; then
-  fail "Expected four agent calls across the restructured split, got $(cat "$COUNT_FILE")"
+# implementation, unblock/restructure, one round per story on the new split, and
+# the scaffold cleanup round that runs once the last story passes.
+if [[ "$(cat "$COUNT_FILE")" -ne 5 ]]; then
+  fail "Expected five agent calls across the restructured split, got $(cat "$COUNT_FILE")"
 fi
 
 grep -q 'judged US-001 blocked and restructured the backlog' "$OUTPUT_FILE"

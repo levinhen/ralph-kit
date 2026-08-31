@@ -14,6 +14,7 @@ TEST_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/ralph-story-budget-test.XXXXXX")
 FIXTURE_REPO="$TEST_ROOT/repo"
 FAKE_BIN="$TEST_ROOT/bin"
 COUNT_FILE="$TEST_ROOT/calls"
+PROMPT_FILE="$TEST_ROOT/prompt"
 OUTPUT_FILE="$TEST_ROOT/output"
 
 cleanup_test() {
@@ -61,7 +62,8 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-cat > /dev/null
+prompt_file="$FAKE_CODEX_PROMPT_FILE"
+cat > "$prompt_file"
 
 call_count=0
 if [[ -f "$FAKE_CODEX_COUNT_FILE" ]]; then
@@ -70,16 +72,25 @@ fi
 call_count=$((call_count + 1))
 printf '%s\n' "$call_count" > "$FAKE_CODEX_COUNT_FILE"
 
-for story_file in "$FAKE_CODEX_STORIES_DIR"/*.json; do
-  [[ -f "$story_file" ]] || continue
-  if [[ "$(jq -r '.passes' "$story_file")" != "true" ]]; then
-    jq '.passes = true' "$story_file" > "$story_file.tmp"
-    mv "$story_file.tmp" "$story_file"
-    break
-  fi
-done
+# The last round of the run is not a story round: once every story passes,
+# Ralph runs the scaffold cleanup round, which is satisfied by its marker file.
+if grep -q '^## Scaffold Cleanup Context' "$prompt_file"; then
+  cleanup_marker=$(grep -m1 '^- Cleanup marker' "$prompt_file" | sed 's/.*`\(.*\)`.*/\1/')
+  cleanup_run_id=$(grep -m1 '^- Run ID: ' "$prompt_file" | sed 's/.*`\(.*\)`.*/\1/')
+  printf 'status=done\nrun_id=%s\n' "$cleanup_run_id" > "$cleanup_marker"
+  message="Removed the run's per-story scaffolding."
+else
+  for story_file in "$FAKE_CODEX_STORIES_DIR"/*.json; do
+    [[ -f "$story_file" ]] || continue
+    if [[ "$(jq -r '.passes' "$story_file")" != "true" ]]; then
+      jq '.passes = true' "$story_file" > "$story_file.tmp"
+      mv "$story_file.tmp" "$story_file"
+      break
+    fi
+  done
 
-message="Completed one story."
+  message="Completed one story."
+fi
 printf '%s\n' "$message" > "$last_message_file"
 printf '%s\n' '{"type":"thread.started","thread_id":"fake-session"}'
 jq -nc --arg text "$message" '{type:"item.completed",item:{type:"agent_message",text:$text}}'
@@ -96,6 +107,7 @@ git -C "$FIXTURE_REPO" commit -qm "test fixture"
 set +e
 PATH="$FAKE_BIN:$PATH" \
   FAKE_CODEX_COUNT_FILE="$COUNT_FILE" \
+  FAKE_CODEX_PROMPT_FILE="$PROMPT_FILE" \
   FAKE_CODEX_STORIES_DIR="$FIXTURE_REPO/ralph/stories" \
   RALPH_NOTIFY=0 \
   RALPH_PROGRESS=0 \
@@ -110,8 +122,9 @@ if [[ "$run_status" -ne 0 ]]; then
   exit 1
 fi
 
-if [[ "$(cat "$COUNT_FILE")" -ne "$STORY_COUNT" ]]; then
-  echo "Expected exactly $STORY_COUNT implementation calls, got $(cat "$COUNT_FILE")" >&2
+# One call per story, plus the single scaffold cleanup round that closes the run.
+if [[ "$(cat "$COUNT_FILE")" -ne "$((STORY_COUNT + 1))" ]]; then
+  echo "Expected exactly $((STORY_COUNT + 1)) agent calls, got $(cat "$COUNT_FILE")" >&2
   cat "$OUTPUT_FILE" >&2
   exit 1
 fi

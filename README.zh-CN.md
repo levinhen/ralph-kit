@@ -57,6 +57,9 @@ ralph/runs/<run_id>/prd.json          机器可读的运行定义
 所有故事 passes=true
         │
         ▼
+脚手架清理回合       拆掉每个故事轮为自证而搭的临时代码
+        │
+        ▼
 merge-back 回合      git merge --no-ff 合回基线分支
                      （冲突 → 专门的 agent 回合解决）
         │
@@ -155,7 +158,7 @@ Ralph:20260817-a [█████░░░░░░░░░░░] 3/8 done | U
 其中两段只在有话可说时才出现：
 
 - **`idle 2m05s/6m00s`**：agent 静默超过 `RALPH_PROGRESS_IDLE_MIN` 秒（默认 30）后出现，整行转为黄色，并一直数到会终止本次调用的空闲超时。没有它的话，一个跑了 5 分钟的测试和一个已经卡死的 CLI 看起来完全一样——阶段计时在两种情况下都照走。
-- **`eta ~2h45m`**：只按**本次运行**完成的故事外推，因此续跑一个半成品 run 时，不会拿已耗时去除以上一次运行的成果。merge-back 和 consolidation 轮不算故事，所以临近收尾时估算会漂——这就是那个波浪号的含义。
+- **`eta ~2h45m`**：只按**本次运行**完成的故事外推，因此续跑一个半成品 run 时，不会拿已耗时去除以上一次运行的成果。收尾轮——脚手架清理、merge-back、consolidation——都不算故事，所以临近收尾时估算会漂——这就是那个波浪号的含义。
 
 后台心跳每 `RALPH_PROGRESS_TICK_SECONDS` 秒（默认 2）重绘一次，因此 agent 静默时计时仍在走；Ralph 被强杀时它也会自行恢复终端。输出被重定向到文件（包括并行编排日志）时会自动关闭——控制码只写 `/dev/tty`，绝不会进日志；设置 `RALPH_PROGRESS=0` 也可手动关闭。
 
@@ -185,7 +188,7 @@ Ralph:20260817-a [█████░░░░░░░░░░░] 3/8 done | U
 |---|---|
 | 青色 | 一个故事轮开始——`Ralph Round 7 (codex) - Target: US-004` |
 | 黄色（加粗） | 故事修复轮（unblock round）及它做出的判定 |
-| 品红 | merge-back 轮 |
+| 品红 | 把分支交回去的各轮：脚手架清理、worktree 收尾、merge-back |
 | 蓝色 | consolidation 轮 |
 | 绿色 | 一个故事、一次合并或整个 run 完成 |
 | 黄色 | 循环会继续跑下去的告警 |
@@ -219,7 +222,17 @@ Ralph usage for this run:
 
 每一轮都是写权限轮——故事轮做实现，收尾轮做定稿与合并，疏通轮要么完成故事要么重塑待办列表——因此全部绕过权限确认运行（`claude --dangerously-skip-permissions`、`codex --dangerously-bypass-approvals-and-sandbox`、`pi --approve`，后者会信任项目本地的 `.pi/` 设置、扩展与技能）。
 
-### 阶段 4 —— merge-back：分支合并回基线
+### 阶段 4 —— 脚手架清理：propping 在分支离开前就得拆掉
+
+所有故事都通过了，而此时分支上有两样东西：功能本身，以及每一轮为了自证那一片切片而搭起来的脚手架——一个 `test:us022core` 这样的 package script、一份塞好的 fixture、一个 demo 路由、一个替尚未落地的依赖顶班的 stub。它们对写下它们的那一轮都是对的，但没有一个该进入基线分支。故事轮自己也拆不掉：每一轮只看得见自己那一片。
+
+所以有一轮专门的回合（`CLEANUP_SCAFFOLD.md`）在 worktree 里跑，位置在收尾轮和 merge-back 之前，视野是整个 run——自 `baseSha` 起的 diff、故事清单，以及各故事轮按 playbook 要求写进进度记录的 `scaffold: <什么> - <为什么>` 行。它移除按故事命名的入口命令、自证用的临时装置、调试探针、已被真实实现取代的桥接件，以及指向本次已完成故事的 TODO。然后跑项目的**全量**测试套件（这一轮的改动天然是横切的——这是唯一一个"跑窄了等于没跑"的无故事回合），提交，最后写入 `.scaffold-cleanup-done`。循环只认这个标记文件，不认 agent 的口头声明。
+
+它的边界是疏通轮边界的镜像：不得改动任何 `passes` 标记、验收标准或 `Covers:` 子句；凡是仍有验收标准依赖的东西，按定义就不是脚手架。最常见的情况不是纯粹的临时代码，而是**一个顶着脚手架名字的真实测试**——这类要先并入项目正常的测试布局、确认项目的常规测试命令确实能跑到它，**然后**才允许删掉那个按故事命名的入口。某次 run 的各轮没留下脚手架，是正常结果：这一轮说明情况就结束。拿不准的一律保留，并写清理由。
+
+`RALPH_SKIP_SCAFFOLD_CLEANUP=1` 可为脚手架本就是刻意留下的分支关掉这一轮。
+
+### 阶段 5 —— merge-back：分支合并回基线
 
 当所有故事通过且 `branchName != baseBranch` 时：
 
@@ -229,7 +242,7 @@ Ralph usage for this run:
 
 循环只认标记文件，不认 agent 的口头声明。
 
-### 阶段 5 —— consolidation 与归档：让知识活得比 run 久
+### 阶段 6 —— consolidation 与归档：让知识活得比 run 久
 
 在基线分支上再跑一轮 agent（`CONSOLIDATE.md`）：
 
@@ -277,7 +290,8 @@ ralph/scripts/orchestrate.sh --tool claude --plan "1 > 2,3 > 4"   # 手工阶段
 | `RALPH_BOARD` | `1` | 编排器状态板（每个并行 run 一行）；设为 `0` 关闭 |
 | `RALPH_PROGRESS_IDLE_MIN` | `30` | agent 静默多少秒后显示空闲计时 |
 | `RALPH_LOG_COLOR` | `auto` | 循环自身状态行的配色；`0` 强制纯文本，`1` 即使被重定向也强制上色（`NO_COLOR` 同样可关闭）|
-| `RALPH_MAX_FINALIZE_ROUNDS` / `RALPH_MAX_MERGE_BACK_ROUNDS` / `RALPH_MAX_CONSOLIDATION_ROUNDS` | 各 `3` | 单个收尾轮最多自我重试几次，超出就停下 |
+| `RALPH_MAX_CLEANUP_ROUNDS` / `RALPH_MAX_FINALIZE_ROUNDS` / `RALPH_MAX_MERGE_BACK_ROUNDS` / `RALPH_MAX_CONSOLIDATION_ROUNDS` | 各 `3` | 单个收尾轮最多自我重试几次，超出就停下 |
+| `RALPH_SKIP_SCAFFOLD_CLEANUP` | `0` | 设为 `1` 跳过脚手架清理轮，按故事轮留下的原样合回分支 |
 | `RALPH_PRICE_INPUT_USD` / `RALPH_PRICE_CACHED_INPUT_USD` | `5` / `0.5` | 每百万 token 美元单价，用于估算 codex 成本（claude 与 pi 自报金额）|
 | `RALPH_PRICE_CACHE_WRITE_USD` / `RALPH_PRICE_OUTPUT_USD` | `6.25` / `30` | 每百万 token 美元单价，用于估算 codex 成本（claude 与 pi 自报金额）|
 | `RALPH_PRICE_MODEL` | `gpt-5.6-sol` | 估算成本时显示的模型标签 |
@@ -316,7 +330,7 @@ npx github:levinhen/ralph-kit doctor
 - `ralph/status/` —— 每个 run 一份实时状态文件，每个阶段写入，供编排器状态板读取
 - `ralph/archive/` —— 已完成/已沉淀的 run 及其源 PRD markdown
 - `ralph/locks/` —— 运行时锁目录
-- `ralph/progress/`、`ralph/stories/`、`ralph/prd.json`、`ralph/progress.txt`、`ralph/state.json`、`ralph/.last-branch`、`ralph/.merge-back-done` —— legacy 模式的运行时文件
+- `ralph/progress/`、`ralph/stories/`、`ralph/prd.json`、`ralph/progress.txt`、`ralph/state.json`、`ralph/.last-branch`、`ralph/.merge-back-done`、`ralph/.scaffold-cleanup-done` —— legacy 模式的运行时文件
 - 已存在的 `AGENTS.md` —— 片段会打印出来，由你自行粘贴
 
 其余每个文件：
@@ -332,7 +346,7 @@ npx github:levinhen/ralph-kit doctor
 核心 Ralph 循环（`ralph/scripts/`）派生自 [snarktank/ralph](https://github.com/snarktank/ralph)（MIT 协议，原始布局在 `scripts/ralph/` 下）。本 kit 在其基础上增加了：
 
 - 多 agent 支持（`CLAUDE.md` + `CODEX.md` + `PI.md` 按 agent 区分的提示词）。
-- run 作用域布局（`runs/<run_id>/`），含 consolidation 与 merge-back 回合。
+- run 作用域布局（`runs/<run_id>/`），含脚手架清理、merge-back 与 consolidation 回合。
 - 配套 Claude Code 技能（`/prd`、`/ralph`）。
 - 一个跨项目保持副本同步的 CLI 安装器。
 

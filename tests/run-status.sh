@@ -61,7 +61,15 @@ if [[ -f "$FAKE_RALPH_STATUS_FILE" ]]; then
   cp "$FAKE_RALPH_STATUS_FILE" "$FAKE_RALPH_SNAPSHOT_DIR/snapshot-$call_count.json"
 fi
 
-if grep -q 'Ralph Story Unblock Round' "$prompt_file"; then
+# The scaffold cleanup round is recognised the way a real agent would recognise
+# it - by the prompt it was handed - and satisfied the way a real one has to be:
+# by writing the marker file the loop actually trusts.
+if grep -q '^## Scaffold Cleanup Context' "$prompt_file"; then
+  cleanup_marker=$(grep -m1 '^- Cleanup marker' "$prompt_file" | sed 's/.*`\(.*\)`.*/\1/')
+  cleanup_run_id=$(grep -m1 '^- Run ID: ' "$prompt_file" | sed 's/.*`\(.*\)`.*/\1/')
+  printf 'status=done\nrun_id=%s\n' "$cleanup_run_id" > "$cleanup_marker"
+  message="Removed the run's per-story scaffolding."
+elif grep -q 'Ralph Story Unblock Round' "$prompt_file"; then
   case "$FAKE_CODEX_UNBLOCK_MODE" in
     finish)
       story_file="$FAKE_CODEX_STORIES_DIR/US-001.json"
@@ -214,6 +222,15 @@ expect_field "$UNBLOCK_SNAPSHOT" "phase" "unblocking"
 expect_field "$UNBLOCK_SNAPSHOT" "storyId" "US-001"
 expect_field "$UNBLOCK_SNAPSHOT" "unblockRounds" "1"
 expect_field "$UNBLOCK_SNAPSHOT" "unblockStoryId" "US-001"
+
+# The wrap-up rounds are on the file too: the scaffold cleanup round belongs to
+# no story, so a watcher would otherwise see the row freeze on the last one.
+CLEANUP_SNAPSHOT="$SNAPSHOT_DIR/snapshot-3.json"
+[[ -f "$CLEANUP_SNAPSHOT" ]] \
+  || fail "No status file existed while the scaffold cleanup round was running"
+expect_field "$CLEANUP_SNAPSHOT" "phase" "cleanup"
+expect_field "$CLEANUP_SNAPSHOT" "storyId" ""
+expect_field "$CLEANUP_SNAPSHOT" "storiesDone" "1"
 
 if [[ "$(status_field "$STORY_SNAPSHOT" "pid")" -le 0 ]]; then
   fail "The status file carried no pid, so a watcher cannot tell a live run from an abandoned file"

@@ -84,6 +84,8 @@ CODEX_PROMPT_FILE="$SCRIPT_DIR/CODEX.md"
 PI_PROMPT_FILE="$SCRIPT_DIR/PI.md"
 MERGE_BACK_PROMPT_FILE="$SCRIPT_DIR/MERGE_BACK.md"
 MERGE_BACK_STATE_FILE="$RALPH_ROOT/.merge-back-done"
+CLEANUP_SCAFFOLD_PROMPT_FILE_TEMPLATE="$SCRIPT_DIR/CLEANUP_SCAFFOLD.md"
+SCAFFOLD_CLEANUP_STATE_FILE="$RALPH_ROOT/.scaffold-cleanup-done"
 CONSOLIDATE_PROMPT_FILE_TEMPLATE="$SCRIPT_DIR/CONSOLIDATE.md"
 UNBLOCK_STORY_PROMPT_FILE_TEMPLATE="$SCRIPT_DIR/UNBLOCK_STORY.md"
 CONSOLIDATION_STATE_FILE=""
@@ -125,6 +127,7 @@ source "$LIB_DIR/progress-bar.sh"
 # After progress-bar.sh: run-status.sh wraps it, so the wrapped functions have
 # to exist first.
 source "$LIB_DIR/run-status.sh"
+source "$LIB_DIR/scaffold-cleanup.sh"
 source "$LIB_DIR/merge-back.sh"
 source "$LIB_DIR/consolidate.sh"
 
@@ -152,6 +155,7 @@ RUN_LOCK_DIR=""
 MERGE_LOCK_DIR=""
 ACTIVE_CONTEXT_PROMPT_FILE=""
 MERGE_PROMPT_FILE=""
+CLEANUP_PROMPT_FILE=""
 FINALIZE_PROMPT_FILE=""
 ITERATION_PROMPT_FILE=""
 CONSOLIDATE_PROMPT_FILE=""
@@ -168,6 +172,7 @@ if [[ "$RUN_MODE" == "scoped" ]]; then
   ROOT_LAST_BRANCH_FILE="$RUN_DIR/.last-branch"
   ROOT_STATE_FILE="$RUN_DIR/state.json"
   MERGE_BACK_STATE_FILE="$RUN_DIR/.merge-back-done"
+  SCAFFOLD_CLEANUP_STATE_FILE="$RUN_DIR/.scaffold-cleanup-done"
   CONSOLIDATION_STATE_FILE="$RALPH_ROOT/.consolidation-done-$RUN_ID"
   CONSOLIDATION_STATE_REL_PATH="ralph/.consolidation-done-$RUN_ID"
   RUN_ID_LABEL="$RUN_ID"
@@ -203,7 +208,7 @@ cleanup() {
   if [[ "$RALPH_IS_WINDOWS" == "true" && -n "$ACTIVE_WORKTREE" && "$ACTIVE_WORKTREE" != "$REPO_ROOT" ]]; then
     windows_sweep_worktree_strays "$ACTIVE_WORKTREE" || true
   fi
-  rm -f "$ACTIVE_CONTEXT_PROMPT_FILE" "$MERGE_PROMPT_FILE" "$FINALIZE_PROMPT_FILE" "$ITERATION_PROMPT_FILE" "$CONSOLIDATE_PROMPT_FILE" "$UNBLOCK_PROMPT_FILE" || true
+  rm -f "$ACTIVE_CONTEXT_PROMPT_FILE" "$MERGE_PROMPT_FILE" "$CLEANUP_PROMPT_FILE" "$FINALIZE_PROMPT_FILE" "$ITERATION_PROMPT_FILE" "$CONSOLIDATE_PROMPT_FILE" "$UNBLOCK_PROMPT_FILE" || true
   release_dir_lock "$MERGE_LOCK_DIR" || true
   release_dir_lock "$RUN_LOCK_DIR" || true
 }
@@ -431,6 +436,11 @@ if [[ ! -f "$MERGE_BACK_PROMPT_FILE" ]]; then
   exit 1
 fi
 
+if scaffold_cleanup_needed && [[ ! -f "$CLEANUP_SCAFFOLD_PROMPT_FILE_TEMPLATE" ]]; then
+  echo "Error: Missing scaffold cleanup prompt file: $CLEANUP_SCAFFOLD_PROMPT_FILE_TEMPLATE"
+  exit 1
+fi
+
 if [[ "$RUN_MODE" == "scoped" && ! -f "$CONSOLIDATE_PROMPT_FILE_TEMPLATE" ]]; then
   echo "Error: Missing consolidation prompt file: $CONSOLIDATE_PROMPT_FILE_TEMPLATE"
   exit 1
@@ -503,6 +513,9 @@ echo "Using Ralph PRD: $PRD_FILE"
 echo "Using Ralph progress log: $PROGRESS_FILE"
 echo "Using Ralph progress dir: $PROGRESS_DIR"
 echo "Using Ralph story files: $STORIES_DIR"
+if scaffold_cleanup_needed; then
+  echo "Scaffold cleanup state file: $SCAFFOLD_CLEANUP_STATE_FILE"
+fi
 if merge_back_needed; then
   echo "Merge-back target base branch: $BASE_BRANCH"
   echo "Merge-back state file: $MERGE_BACK_STATE_FILE"
@@ -535,9 +548,11 @@ ralph_status_start "$STATUS_ROOT" "$PRD_FILE" "$RUN_ID_LABEL" "$TOOL"
 # around it, or ends the run. The wrap-up rounds are the ones that can spin,
 # because each one re-runs its agent until a marker file appears - so they carry
 # their own budgets instead of sharing one iteration cap with the stories.
+MAX_CLEANUP_ROUNDS="${RALPH_MAX_CLEANUP_ROUNDS:-3}"
 MAX_FINALIZE_ROUNDS="${RALPH_MAX_FINALIZE_ROUNDS:-3}"
 MAX_MERGE_BACK_ROUNDS="${RALPH_MAX_MERGE_BACK_ROUNDS:-3}"
 MAX_CONSOLIDATION_ROUNDS="${RALPH_MAX_CONSOLIDATION_ROUNDS:-3}"
+CLEANUP_ROUNDS=0
 FINALIZE_ROUNDS=0
 MERGE_BACK_ROUNDS=0
 CONSOLIDATION_ROUNDS=0
@@ -583,16 +598,100 @@ while true; do
 
   if [[ -n "$CURRENT_STORY_ID" ]]; then
     ralph_status_update "working" "$CURRENT_STORY_ID" "$ROUND"
+    # The cleanup marker is cleared with the rest: a story round that runs after
+    # it - a restructure, or a rerun with new stories - can add scaffolding of
+    # its own, and a stale marker would carry that straight into the merge.
+    rm -f "$SCAFFOLD_CLEANUP_STATE_FILE"
     rm -f "$MERGE_BACK_STATE_FILE"
     [[ -n "$CONSOLIDATION_STATE_FILE" ]] && rm -f "$CONSOLIDATION_STATE_FILE"
     # Back in the story phase, so the wrap-up markers above were just cleared
     # and any earlier wrap-up attempt no longer describes the current state.
+    CLEANUP_ROUNDS=0
     FINALIZE_ROUNDS=0
     MERGE_BACK_ROUNDS=0
     CONSOLIDATION_ROUNDS=0
   fi
 
   if [[ -z "$CURRENT_STORY_ID" ]]; then
+    # Before anything leaves this branch: one round that sees the whole run and
+    # strips the propping each story round built to prove its own slice. It runs
+    # in the Ralph worktree, ahead of finalization and merge-back, because the
+    # scaffolding is branch content and this is the last chance to edit it as
+    # ordinary code rather than as a merge conflict.
+    if scaffold_cleanup_needed && ! scaffold_cleanup_done; then
+      CLEANUP_ROUNDS=$((CLEANUP_ROUNDS + 1))
+      if [[ "$CLEANUP_ROUNDS" -gt "$MAX_CLEANUP_ROUNDS" ]]; then
+        wrap_up_budget_exhausted "scaffold cleanup" "$MAX_CLEANUP_ROUNDS"
+      fi
+
+      ralph_status_update "cleanup" "" "$ROUND"
+      echo ""
+      ralph_log_banner merge "Ralph Scaffold Cleanup Round ($TOOL) - ${TARGET_BRANCH:-$BASE_BRANCH}"
+      ralph_log_line merge "Every story passes. This round removes the per-story scaffolding before anything merges back; it may not touch a criterion or a passes flag."
+
+      if [[ "$RUN_MODE" == "scoped" ]]; then
+        CLEANUP_APPEND_COMMAND="bash ralph/scripts/append-progress-json.sh --run $RUN_ID --story SCAFFOLD-CLEANUP --record path/to/progress-record.json"
+      else
+        CLEANUP_APPEND_COMMAND="bash ralph/scripts/append-progress-json.sh --legacy --story SCAFFOLD-CLEANUP --record path/to/progress-record.json"
+      fi
+      # The story list is the round's index of what to look for: scaffolding is
+      # named after the story that needed it far more often than not.
+      CLEANUP_STORY_LIST=$(jq -r '
+        .userStories[]
+        | "- `" + .id + "` " + (.title // "")
+      ' "$PRD_FILE" 2>/dev/null || echo "")
+
+      CLEANUP_PROMPT_FILE=$(mktemp)
+      make_prompt_with_run_context "$TOOL_PROMPT_FILE" "$CLEANUP_PROMPT_FILE"
+      printf "\n\n" >> "$CLEANUP_PROMPT_FILE"
+      cat "$CLEANUP_SCAFFOLD_PROMPT_FILE_TEMPLATE" >> "$CLEANUP_PROMPT_FILE"
+      printf "\n\n" >> "$CLEANUP_PROMPT_FILE"
+      cat <<EOF >> "$CLEANUP_PROMPT_FILE"
+
+## Scaffold Cleanup Context
+
+- Run ID: \`$RUN_ID_LABEL\`
+- Ralph branch: \`${TARGET_BRANCH:-$BASE_BRANCH}\`
+- Ralph worktree (do all work here): \`$ACTIVE_WORKTREE\`
+- Base commit this run started from: \`$BASE_SHA\`
+- Run PRD path: \`$PRD_REL_PATH\`
+- Run story files: \`$STORIES_REL_DIR\`
+- Run progress dir: \`$PROGRESS_REL_DIR\`
+- Append this round's progress record with:
+  \`$CLEANUP_APPEND_COMMAND\`
+- Cleanup marker (write this last, do NOT commit it): \`$SCAFFOLD_CLEANUP_STATE_FILE\`
+
+Stories completed in this run:
+
+$CLEANUP_STORY_LIST
+EOF
+
+      run_selected_tool "$ACTIVE_WORKTREE" "$CLEANUP_PROMPT_FILE"
+      rm -f "$CLEANUP_PROMPT_FILE"
+      CLEANUP_PROMPT_FILE=""
+
+      if scaffold_cleanup_done; then
+        echo ""
+        if merge_back_needed; then
+          ralph_log_line success "Ralph finished the scaffold cleanup round. Merge-back next."
+        else
+          ralph_log_line success "Ralph finished the scaffold cleanup round."
+        fi
+        sleep 2
+        continue
+      fi
+
+      if [[ "$TOOL" == "codex" && "$LAST_MESSAGE" == *"<promise>COMPLETE</promise>"* ]]; then
+        ralph_log_line warn "Warning: Codex reported COMPLETE, but the scaffold cleanup marker was not written. Continuing."
+      elif echo "$OUTPUT" | grep -q "<promise>COMPLETE</promise>"; then
+        ralph_log_line warn "Warning: Tool reported COMPLETE, but the scaffold cleanup marker was not written. Continuing."
+      fi
+
+      echo "Scaffold cleanup round complete (marker not yet written). Continuing..."
+      sleep 2
+      continue
+    fi
+
     if merge_back_needed && ! merge_back_done; then
       ralph_status_update "merge-back" "" "$ROUND"
       echo ""
@@ -905,7 +1004,9 @@ EOF
     exit 1
   fi
 
-  if [[ "$ALL_COMPLETE" == "true" ]] && merge_back_needed; then
+  if [[ "$ALL_COMPLETE" == "true" ]] && scaffold_cleanup_needed && ! scaffold_cleanup_done; then
+    ralph_log_line success "All stories are marked complete in $PRD_FILE. The next round will strip the run's per-story scaffolding."
+  elif [[ "$ALL_COMPLETE" == "true" ]] && merge_back_needed; then
     ralph_log_line success "All stories are marked complete in $PRD_FILE. The next round will run the dedicated merge-back round."
   elif [[ "$ALL_COMPLETE" == "true" ]]; then
     ralph_status_update "complete" "" "$ROUND"

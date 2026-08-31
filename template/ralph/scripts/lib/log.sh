@@ -44,7 +44,8 @@ fi
 #
 #   story        cyan     - a new user story round starts here
 #   unblock      yellow   - the repair round; the run is off the happy path
-#   merge        magenta  - merge-back round
+#   merge        magenta  - handing the branch back: scaffold cleanup, worktree
+#                           finalization, merge-back
 #   consolidate  blue     - consolidation round
 #   success      green    - a story, a merge, or the whole run finished
 #   warn         yellow   - something surprising, the loop continues

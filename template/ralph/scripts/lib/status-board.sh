@@ -214,6 +214,7 @@ ralph_board_row() {
           glyph="$RALPH_BOARD_GLYPH_FLAG"
           style="unblock"
           ;;
+        cleanup) label="cleanup"; style="merge" ;;
         finalizing) label="finalize"; style="merge" ;;
         merge-back) label="merge-back"; style="merge" ;;
         consolidating) label="consolidate"; style="consolidate" ;;

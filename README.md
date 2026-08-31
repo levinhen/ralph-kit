@@ -59,6 +59,9 @@ ralph/runs/<run_id>/prd.json          machine-readable run
 all stories passes=true
         │
         ▼
+scaffold cleanup     strip the propping each story round built to prove itself
+        │
+        ▼
 merge-back round     git merge --no-ff into the base branch
                      (conflicts → dedicated agent round)
         │
@@ -157,7 +160,7 @@ Segments are added in priority order and the row degrades from the right as the 
 Two of the segments only appear when they have something to say:
 
 - **`idle 2m05s/6m00s`** turns the whole row yellow once the agent has been silent for `RALPH_PROGRESS_IDLE_MIN` seconds (default 30), counting up to the idle timeout that will kill the invocation. Without it a long test run and a wedged CLI look identical — the phase clock advances the same way in both.
-- **`eta ~2h45m`** extrapolates from the stories *this* run completed, so resuming a half-finished run does not divide the elapsed time by someone else's work. Merge-back and consolidation rounds are not stories, so it drifts near the end of a run; hence the tilde.
+- **`eta ~2h45m`** extrapolates from the stories *this* run completed, so resuming a half-finished run does not divide the elapsed time by someone else's work. The wrap-up rounds — scaffold cleanup, merge-back, consolidation — are not stories, so it drifts near the end of a run; hence the tilde.
 
 A background ticker redraws it every `RALPH_PROGRESS_TICK_SECONDS` (default 2) so the clocks keep moving while an agent is silent, and it restores the terminal on its own if Ralph is killed outright. It disables itself when output is redirected (including parallel orchestrator logs) — control codes only ever go to `/dev/tty`, never into a log; set `RALPH_PROGRESS=0` to turn it off explicitly.
 
@@ -187,7 +190,7 @@ A round prints thousands of lines of agent output, so the handful of lines that 
 |---|---|
 | cyan | a story round starting — `Ralph Round 7 (codex) - Target: US-004` |
 | yellow (bold) | the story unblock round, and everything it decides |
-| magenta | the merge-back round |
+| magenta | handing the branch back: scaffold cleanup, worktree finalization, merge-back |
 | blue | the consolidation round |
 | green | a story, a merge, or the whole run finished |
 | yellow | a warning the loop continues past |
@@ -221,7 +224,17 @@ Guard rails: a per-invocation idle timeout (default 360 s of silence) and option
 
 Every round is a write round — the story rounds implement, the wrap-up rounds finalize and merge, and the unblock round either finishes a story or reshapes the backlog — so all of them run with permission prompts bypassed (`claude --dangerously-skip-permissions`, `codex --dangerously-bypass-approvals-and-sandbox`, `pi --approve`, which trusts project-local `.pi/` settings, extensions, and skills).
 
-### Stage 4 — Merge-back: the branch returns to base
+### Stage 4 — Scaffold cleanup: the propping comes out before the branch does
+
+Every story passes, and the branch now carries two things: the feature, and whatever each round built to prove its own slice — a `test:us022core` package script, a seeded fixture, a demo route, a stub standing in for a dependency that only landed two stories later. Each was correct for the round that wrote it, and none of it should reach the base branch. No story round could have removed it either: each one only ever saw its own slice.
+
+So one round (`CLEANUP_SCAFFOLD.md`) runs in the worktree, ahead of finalization and merge-back, with the whole run in view — the diff since `baseSha`, the story list, and the `scaffold: <what> - <why>` lines the playbooks ask every story round to leave in its progress record. It removes per-story entry points, self-verification props, debug probes, bridges the real implementation has since replaced, and TODOs pointing at completed stories. Then it runs the project's **whole** suite (its edits are cross-cutting by nature — this is the one story-free round where a scoped run would prove nothing), commits, and writes `.scaffold-cleanup-done`. The marker, not the agent's word, is what the loop trusts.
+
+Its boundary is the mirror image of the unblock round's: it may not touch a `passes` flag, an acceptance criterion, or a `Covers:` clause, and anything a criterion still rests on is not scaffolding by definition. The common case is not a pure prop but a real test wearing a scaffold's name — those move into the project's normal test layout and are confirmed to run from the project's ordinary test command *before* the per-story runner goes away. A run whose rounds left no propping is a normal outcome; the round says so and finishes. When in doubt it keeps things and records why.
+
+`RALPH_SKIP_SCAFFOLD_CLEANUP=1` switches the round off for a branch whose scaffolding is deliberate.
+
+### Stage 5 — Merge-back: the branch returns to base
 
 When every story passes and `branchName != baseBranch`:
 
@@ -231,7 +244,7 @@ When every story passes and `branchName != baseBranch`:
 
 The marker file — not the agent's word — is what the loop trusts.
 
-### Stage 5 — Consolidate & archive: knowledge outlives the run
+### Stage 6 — Consolidate & archive: knowledge outlives the run
 
 One more agent round (`CONSOLIDATE.md`) runs on the base branch:
 
@@ -279,7 +292,8 @@ With no `--plan`, the orchestrator reads `dependsOnRuns` across the incomplete r
 | `RALPH_BOARD` | `1` | orchestrator status board (one row per parallel run); set to `0` to disable |
 | `RALPH_PROGRESS_IDLE_MIN` | `30` | seconds of agent silence before the idle clock appears |
 | `RALPH_LOG_COLOR` | `auto` | colour on the loop's own status lines; `0` forces plain text, `1` forces colour even when redirected (`NO_COLOR` also disables it) |
-| `RALPH_MAX_FINALIZE_ROUNDS` / `RALPH_MAX_MERGE_BACK_ROUNDS` / `RALPH_MAX_CONSOLIDATION_ROUNDS` | `3` each | how often a wrap-up round may retry itself before Ralph stops |
+| `RALPH_MAX_CLEANUP_ROUNDS` / `RALPH_MAX_FINALIZE_ROUNDS` / `RALPH_MAX_MERGE_BACK_ROUNDS` / `RALPH_MAX_CONSOLIDATION_ROUNDS` | `3` each | how often a wrap-up round may retry itself before Ralph stops |
+| `RALPH_SKIP_SCAFFOLD_CLEANUP` | `0` | `1` skips the scaffold cleanup round and merges the branch back as the story rounds left it |
 | `RALPH_PRICE_INPUT_USD` / `RALPH_PRICE_CACHED_INPUT_USD` | `5` / `0.5` | USD per 1M tokens, used to estimate codex cost (claude and pi report their own) |
 | `RALPH_PRICE_CACHE_WRITE_USD` / `RALPH_PRICE_OUTPUT_USD` | `6.25` / `30` | USD per 1M tokens, used to estimate codex cost (claude and pi report their own) |
 | `RALPH_PRICE_MODEL` | `gpt-5.6-sol` | model label shown next to an estimated cost |
@@ -321,7 +335,7 @@ silently ignored and never make the command fail.
 - `ralph/status/` — one live status file per run, written every phase and read by the orchestrator's board
 - `ralph/archive/` — completed/consolidated runs and their source PRDs
 - `ralph/locks/` — runtime lock directories
-- `ralph/progress/`, `ralph/stories/`, `ralph/prd.json`, `ralph/progress.txt`, `ralph/state.json`, `ralph/.last-branch`, `ralph/.merge-back-done` — legacy-mode runtime files
+- `ralph/progress/`, `ralph/stories/`, `ralph/prd.json`, `ralph/progress.txt`, `ralph/state.json`, `ralph/.last-branch`, `ralph/.merge-back-done`, `ralph/.scaffold-cleanup-done` — legacy-mode runtime files
 - An existing `AGENTS.md` — the snippet is printed for you to paste
 
 For every other file:
@@ -337,7 +351,7 @@ Run `ralph-kit doctor` any time to see drift.
 The core Ralph loop (`ralph/scripts/`) is derived from [snarktank/ralph](https://github.com/snarktank/ralph) (MIT, originally laid out under `scripts/ralph/`). This kit adds:
 
 - Multi-agent support (`CLAUDE.md` + `CODEX.md` + `PI.md` per-agent prompts).
-- Run-scoped layout (`runs/<run_id>/`) with consolidation + merge-back rounds.
+- Run-scoped layout (`runs/<run_id>/`) with scaffold cleanup, merge-back, and consolidation rounds.
 - Companion `/prd` and `/ralph` skills for both Claude Code (`.claude/skills/`) and Codex/pi (`.agents/skills/`).
 - A CLI installer that keeps copies in sync across multiple projects.
 

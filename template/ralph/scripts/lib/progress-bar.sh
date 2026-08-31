@@ -284,6 +284,7 @@ ralph_progress_render() {
     working) phase_label="working" ;;
     checking) phase_label="checking" ;;
     unblocking) phase_label="unblocking story" ;;
+    cleanup) phase_label="scaffold cleanup" ;;
     finalizing) phase_label="finalizing worktree" ;;
     merge-back) phase_label="merge-back" ;;
     consolidating) phase_label="consolidating" ;;

@@ -89,8 +89,9 @@ archive_consolidated_run() {
     echo "Archiving completed run dir: ralph/runs/$RUN_ID -> ralph/archive/$archive_name"
     mv "$source_dir" "$archive_target"
 
-    # The .merge-back-done marker is an in-progress signal and should not be archived.
+    # The wrap-up markers are in-progress signals and should not be archived.
     rm -f "$archive_target/.merge-back-done"
+    rm -f "$archive_target/.scaffold-cleanup-done"
   else
     echo "Ralph consolidation: run dir already archived or missing: $source_dir"
     archive_target="$(find_run_archive_dir)"

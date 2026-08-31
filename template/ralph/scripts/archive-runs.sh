@@ -50,10 +50,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-RALPH_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-REPO_ROOT="$(cd "$RALPH_ROOT/.." && pwd)"
-RUNS_ROOT="$RALPH_ROOT/runs"
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/run-context.sh"
 
 if [[ -z "$ARCHIVE_ROOT" ]]; then
   ARCHIVE_ROOT="$RALPH_ROOT/archive"

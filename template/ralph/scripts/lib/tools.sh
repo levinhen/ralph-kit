@@ -2,20 +2,48 @@
 
 RALPH_LIB_DIR="${RALPH_LIB_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
 RALPH_STREAM_READER="$RALPH_LIB_DIR/stream-agent.mjs"
+RALPH_PLAYBOOK_DIR="${RALPH_PLAYBOOK_DIR:-$RALPH_LIB_DIR/../playbooks}"
+# shellcheck source=tool-registry.sh
+source "$RALPH_LIB_DIR/tool-registry.sh"
 
-resolve_tool_prompt() {
-  case "$TOOL" in
-    claude) echo "$CLAUDE_PROMPT_FILE" ;;
-    codex)  echo "$CODEX_PROMPT_FILE" ;;
-    pi)     echo "$PI_PROMPT_FILE" ;;
-  esac
+render_tool_prompt() {
+  local source_prompt="$1"
+  local dest_prompt="$2"
+  local line
+  local include_name
+  local include_file
+
+  : > "$dest_prompt"
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    case "$line" in
+      '<!-- ralph-include:'*' -->')
+        include_name="${line#<!-- ralph-include:}"
+        include_name="${include_name% -->}"
+        case "$include_name" in
+          ''|*[!A-Za-z0-9._-]*)
+            echo "Error: Invalid Ralph playbook include '$include_name' in $source_prompt" >&2
+            return 1
+            ;;
+        esac
+        include_file="$RALPH_PLAYBOOK_DIR/$include_name"
+        if [[ ! -f "$include_file" ]]; then
+          echo "Error: Missing Ralph playbook fragment: $include_file" >&2
+          return 1
+        fi
+        cat "$include_file" >> "$dest_prompt"
+        ;;
+      *)
+        printf '%s\n' "$line" >> "$dest_prompt"
+        ;;
+    esac
+  done < "$source_prompt"
 }
 
 make_prompt_with_run_context() {
   local base_prompt="$1"
   local dest_prompt="$2"
 
-  cat "$base_prompt" > "$dest_prompt"
+  render_tool_prompt "$base_prompt" "$dest_prompt" || return 1
   cat <<EOF >> "$dest_prompt"
 
 ## Ralph Run Context
@@ -133,12 +161,12 @@ run_selected_tool() {
 
   # The watchdog polls this file to decide whether the tool is wedged; the status
   # row reads its mtime to show the same silence to the user while it builds.
-  ralph_status_set_activity "$activity_file"
+  ralph_observers_activity "$activity_file"
 
   start_tracked_process "$run_cwd" "$prompt_file" "$output_fifo" "${command_args[@]}"
   wait_for_active_tool "$activity_file" counter || tool_exit_code=$?
 
-  ralph_status_set_activity ""
+  ralph_observers_activity ""
 
   finalize_tool_cleanup "$run_cwd"
 

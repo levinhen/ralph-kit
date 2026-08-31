@@ -62,8 +62,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-RALPH_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/run-context.sh"
 
 if [[ "$USE_LEGACY" == "true" && -n "$RUN_ID" ]]; then
   echo "Error: Use either --run <run_id> or --legacy, not both." >&2
@@ -80,23 +79,24 @@ if [[ -z "$STORY_ID" ]]; then
   exit 1
 fi
 
-if [[ -n "$RUN_ID" && ! "$RUN_ID" =~ ^[A-Za-z0-9._-]+$ ]]; then
-  echo "Error: Invalid run id '$RUN_ID'." >&2
+if [[ -n "$RUN_ID" ]] && ! ralph_run_id_is_valid "$RUN_ID"; then
+  ralph_print_invalid_run_id "$RUN_ID"
   exit 1
 fi
 
-if [[ ! "$STORY_ID" =~ ^[A-Za-z0-9._-]+$ ]]; then
+if ! ralph_story_id_is_valid "$STORY_ID"; then
   echo "Error: Invalid story id '$STORY_ID'." >&2
   exit 1
 fi
 
 if [[ "$USE_LEGACY" == "true" ]]; then
-  PROGRESS_DIR="$RALPH_ROOT/progress"
+  ralph_context_set_root_paths "legacy" ""
 else
-  PROGRESS_DIR="$RALPH_ROOT/runs/$RUN_ID/progress"
+  ralph_context_set_root_paths "scoped" "$RUN_ID"
 fi
 
-SHARED_MEMORY_FILE="$PROGRESS_DIR/shared-memory.json"
+PROGRESS_DIR="$ROOT_PROGRESS_DIR"
+SHARED_MEMORY_FILE="$ROOT_SHARED_MEMORY_FILE"
 STORY_JSONL_FILE="$PROGRESS_DIR/$STORY_ID.jsonl"
 
 mkdir -p "$PROGRESS_DIR"

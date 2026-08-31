@@ -14,6 +14,11 @@
 # stdout or stderr: orchestrate.sh's own output is captured by the tests and
 # read back by humans, and must stay byte-identical plain text.
 
+_ralph_board_lib_dir=$(CDPATH= cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+# shellcheck source=terminal.sh
+. "$_ralph_board_lib_dir/terminal.sh"
+unset _ralph_board_lib_dir
+
 RALPH_BOARD_ACTIVE="false"
 RALPH_BOARD_ROWS=0          # terminal height
 RALPH_BOARD_COLS=0
@@ -32,7 +37,7 @@ RALPH_BOARD_GLYPH_BAD="x"
 RALPH_BOARD_GLYPH_FLAG="!"
 
 ralph_board_tty_write() {
-  printf '%b' "$1" > /dev/tty 2>/dev/null || true
+  ralph_terminal_tty_write "$1"
 }
 
 ralph_board_supported() {
@@ -40,25 +45,14 @@ ralph_board_supported() {
     0 | false | no | off) return 1 ;;
   esac
 
-  [[ -t 1 ]] || return 1
-  [[ "${TERM:-dumb}" != "dumb" ]] || return 1
-  [[ -w /dev/tty ]] || return 1
+  ralph_terminal_supported 1 || return 1
   command -v jq >/dev/null 2>&1 || return 1
 }
 
 ralph_board_terminal_size() {
-  local size
-
-  size=$(stty size < /dev/tty 2>/dev/null || echo "")
-  if [[ "$size" =~ ^[0-9]+[[:space:]][0-9]+$ ]]; then
-    RALPH_BOARD_ROWS="${size%% *}"
-    RALPH_BOARD_COLS="${size##* }"
-  elif command -v tput >/dev/null 2>&1; then
-    RALPH_BOARD_ROWS=$(tput lines 2>/dev/null || echo 0)
-    RALPH_BOARD_COLS=$(tput cols 2>/dev/null || echo 0)
-  else
-    return 1
-  fi
+  ralph_terminal_probe_size || return 1
+  RALPH_BOARD_ROWS="$RALPH_TERMINAL_ROWS"
+  RALPH_BOARD_COLS="$RALPH_TERMINAL_COLS"
 
   [[ "$RALPH_BOARD_ROWS" =~ ^[0-9]+$ ]] || return 1
   [[ "$RALPH_BOARD_COLS" =~ ^[0-9]+$ ]] || return 1
@@ -66,14 +60,7 @@ ralph_board_terminal_size() {
 }
 
 ralph_board_duration() {
-  local seconds="$1"
-
-  [[ "$seconds" =~ ^[0-9]+$ ]] || return 0
-  if [[ "$seconds" -lt 3600 ]]; then
-    printf '%dm%02ds' "$((seconds / 60))" "$((seconds % 60))"
-  else
-    printf '%dh%02dm' "$((seconds / 3600))" "$(((seconds % 3600) / 60))"
-  fi
+  ralph_terminal_duration "$1"
 }
 
 # Reserve HEIGHT rows at the bottom and shrink the scrolling region to the rest.
@@ -106,15 +93,13 @@ ralph_board_start() {
   ralph_board_supported || return 0
   ralph_board_terminal_size || return 0
 
-  case "${LC_ALL:-${LC_CTYPE:-${LANG:-}}}" in
-    *UTF-8* | *utf8* | *UTF8* | *utf-8*)
-      RALPH_BOARD_GLYPH_RUN="●"
-      RALPH_BOARD_GLYPH_WAIT="○"
-      RALPH_BOARD_GLYPH_OK="✓"
-      RALPH_BOARD_GLYPH_BAD="✗"
-      RALPH_BOARD_GLYPH_FLAG="⚑"
-      ;;
-  esac
+  if ralph_terminal_utf8; then
+    RALPH_BOARD_GLYPH_RUN="●"
+    RALPH_BOARD_GLYPH_WAIT="○"
+    RALPH_BOARD_GLYPH_OK="✓"
+    RALPH_BOARD_GLYPH_BAD="✗"
+    RALPH_BOARD_GLYPH_FLAG="⚑"
+  fi
 
   RALPH_BOARD_STATUS_DIR="$status_dir"
 

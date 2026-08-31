@@ -7,6 +7,11 @@
 # All control sequences go to /dev/tty, never to stdout/stderr, so nothing can
 # leak into a pipe or a log file even if only one of the two is redirected.
 
+_ralph_progress_lib_dir=$(CDPATH= cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+# shellcheck source=terminal.sh
+. "$_ralph_progress_lib_dir/terminal.sh"
+unset _ralph_progress_lib_dir
+
 RALPH_PROGRESS_ACTIVE="false"
 RALPH_PROGRESS_ROWS=0
 RALPH_PROGRESS_COLS=0
@@ -46,7 +51,7 @@ RALPH_PROGRESS_LINE=""
 RALPH_PROGRESS_BUDGET=0
 
 ralph_progress_tty_write() {
-  printf '%b' "$1" > /dev/tty 2>/dev/null || true
+  ralph_terminal_tty_write "$1"
 }
 
 ralph_progress_supported() {
@@ -56,24 +61,16 @@ ralph_progress_supported() {
 
   # Both streams must be a terminal: the loop prints to stdout, the tool stream
   # prints to stderr, and a pinned row only makes sense when both land here.
-  [[ -t 1 && -t 2 ]] || return 1
-  [[ "${TERM:-dumb}" != "dumb" ]] || return 1
-  [[ -w /dev/tty ]] || return 1
+  ralph_terminal_supported 1 2 || return 1
   command -v jq >/dev/null 2>&1 || return 1
   [[ "$RALPH_PROGRESS_TICK_SECONDS" =~ ^[0-9]+$ && "$RALPH_PROGRESS_TICK_SECONDS" -ge 1 ]] \
     || RALPH_PROGRESS_TICK_SECONDS=2
 }
 
 ralph_progress_terminal_size() {
-  local size
-
-  size=$(stty size < /dev/tty 2>/dev/null || echo "")
-  if [[ "$size" =~ ^[0-9]+[[:space:]][0-9]+$ ]]; then
-    RALPH_PROGRESS_ROWS="${size%% *}"
-    RALPH_PROGRESS_COLS="${size##* }"
-  elif command -v tput >/dev/null 2>&1; then
-    RALPH_PROGRESS_ROWS=$(tput lines 2>/dev/null || echo 0)
-    RALPH_PROGRESS_COLS=$(tput cols 2>/dev/null || echo 0)
+  if ralph_terminal_probe_size; then
+    RALPH_PROGRESS_ROWS="$RALPH_TERMINAL_ROWS"
+    RALPH_PROGRESS_COLS="$RALPH_TERMINAL_COLS"
   else
     RALPH_PROGRESS_ROWS=0
     RALPH_PROGRESS_COLS=0
@@ -135,14 +132,7 @@ ralph_progress_set_activity() {
 }
 
 ralph_progress_duration() {
-  local seconds="$1"
-
-  [[ "$seconds" =~ ^[0-9]+$ ]] || return 0
-  if [[ "$seconds" -lt 3600 ]]; then
-    printf '%dm%02ds' "$((seconds / 60))" "$((seconds % 60))"
-  else
-    printf '%dh%02dm' "$((seconds / 3600))" "$(((seconds % 3600) / 60))"
-  fi
+  ralph_terminal_duration "$1"
 }
 
 ralph_progress_mtime() {
@@ -195,12 +185,10 @@ ralph_progress_bar() {
   local empty_char="-"
   local bar=""
 
-  case "${LC_ALL:-${LC_CTYPE:-${LANG:-}}}" in
-    *UTF-8* | *utf8* | *UTF8* | *utf-8*)
-      full_char="█"
-      empty_char="░"
-      ;;
-  esac
+  if ralph_terminal_utf8; then
+    full_char="█"
+    empty_char="░"
+  fi
 
   while [[ "$filled" -gt 0 ]]; do
     bar="${bar}${full_char}"

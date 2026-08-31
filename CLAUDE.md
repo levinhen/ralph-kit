@@ -24,15 +24,17 @@ npm test
 
 ## Editing rules that are easy to get wrong
 
-- **Skills ship twice.** `template/.claude/skills/<name>/SKILL.md` and
-  `template/.agents/skills/<name>/SKILL.md` must stay byte-identical — one copy
-  serves Claude Code, the other serves Codex and pi. `ralph-kit doctor` flags a
-  drift between them.
-- **Agent playbooks come in three.** `CLAUDE.md`, `CODEX.md`, and `PI.md` under
-  `template/ralph/scripts/` are per-tool round instructions. A change to how a
-  round should behave usually belongs in all three; decide deliberately when it
-  does not. CODEX.md and PI.md drive the same model family, so they diverge
-  least.
+- **Skills have one source and two install targets.** Edit only
+  `template/.agents/skills/<name>/SKILL.md`. The installer's managed-file plan
+  projects that canonical source to both `.agents/skills/` (Codex and pi) and
+  `.claude/skills/` (Claude Code), so target projects still receive byte-identical
+  files without this repository maintaining two editable copies.
+- **Agent playbooks have shared fragments and three thin variants.** `CLAUDE.md`,
+  `CODEX.md`, and `PI.md` under `template/ralph/scripts/` keep only genuinely
+  tool-specific round instructions. Shared sections live in
+  `template/ralph/scripts/playbooks/` and are expanded by `render_tool_prompt`
+  before a round starts. Edit the fragment when behavior belongs to every tool;
+  edit a variant only when the tool contract is actually different.
 - **Acceptance criteria never name a tool.** `/prd` and `/ralph` write criteria
   into `prd.json`, and an implementation round can only satisfy them with the
   tooling it happens to have. Write the observable outcome
@@ -45,6 +47,12 @@ npm test
   them from `SCRIPT_DIR` and folds them into a temporary prompt file, so a new
   prompt file needs no worktree copy and no entry in `sync_root_ralph_inputs`.
   Copying them into the worktree is what used to go stale — do not add it back.
+- **Run paths have one owner.** `lib/run-context.sh` validates run ids and derives
+  every root/active/run-scoped path, prompt path, and branch label used by the
+  lifecycle scripts. Source it and consume the exported context instead of
+  rebuilding `ralph/runs/<run_id>` or selecting legacy paths in another script.
+  The same rule applies to tool selection: supported tool names and prompt
+  mapping live in `lib/tool-registry.sh`.
 - **"Still in flight" is a directory fact both skills bet on.** `/prd` and `/ralph`
   open by sweeping `ralph/tasks/` and `ralph/runs/` and reading whatever is left
   there as written-but-unfinished. That only holds because consolidation moves a
@@ -106,24 +114,26 @@ npm test
   `ralph/status/<run_id>.json`. Only the first is allowed to give up when the
   streams are not a tty — `orchestrate.sh` redirects every parallel run to a log
   file, so a status file gated on a tty would be empty in exactly the case it
-  exists for. `ralph_status_update` is the single front door: it drives both,
-  and nothing should call `ralph_progress_update` directly again. The file stays
-  out of `ralph/runs/` deliberately — consolidation moves that directory into
-  `ralph/archive/` and stages it with `git add -A`, and runtime state has no
-  business in a commit.
+  exists for. `lib/run-observers.sh` is the composition front door: lifecycle
+  code calls `ralph_observers_*`, while `run-status.sh` remains JSON-only and
+  `progress-bar.sh` remains terminal-only. The file stays out of `ralph/runs/`
+  deliberately — consolidation moves that directory into `ralph/archive/` and
+  stages it with `git add -A`, and runtime state has no business in a commit.
   `orchestrate.sh` reads those files into a status board pinned to its own
-  terminal (`lib/status-board.sh`). Like the log colours and the progress row,
-  it writes SGR and cursor codes to `/dev/tty` only: the tests capture the
-  orchestrator's stdout and every parallel run's output is a log file, and both
-  must stay byte-identical plain text. `tests/run-status.sh` asserts that, and
-  asserts the status file is current *mid-run* rather than only at exit.
+  terminal (`lib/status-board.sh`). It and the progress row share terminal
+  capability, sizing, cursor, and duration helpers from `lib/terminal.sh`. Like
+  the log colours, both write SGR and cursor codes to `/dev/tty` only: the tests
+  capture the orchestrator's stdout and every parallel run's output is a log
+  file, and both must stay byte-identical plain text. `tests/run-status.sh`
+  asserts that, and asserts the status file is current *mid-run* rather than
+  only at exit.
 - **The unblock round's verdict is a fourth thing the status file carries.**
   `unblockRounds` counts the phase transition into `unblocking`; the outcome is
-  stamped by `ralph_status_unblock_outcome` at each of the three exits in
-  `ralph.sh` — `finished`, `restructured`, `stopped`. The board keeps that
-  marker on a finished run's row, because a run whose output went to a file has
-  no other cheap way to say it left the happy path. Adding a fourth exit to the
-  failure path means stamping it there too, or the row silently reports the
+  stamped through `ralph_observers_unblock` at each of the three exits in
+  `lib/story-phase.sh` — `finished`, `restructured`, `stopped`. The board keeps
+  that marker on a finished run's row, because a run whose output went to a file
+  has no other cheap way to say it left the happy path. Adding a fourth exit to
+  the failure path means stamping it there too, or the row silently reports the
   previous verdict.
 - **The failure path is described in four places.** Story failure runs exactly
   one round (`UNBLOCK_STORY.md`), which decides whether the story is genuinely
@@ -131,8 +141,8 @@ npm test
   blocked means the run PRD is restructured around it and the loop continues on
   the new split, and neither means Ralph stops. The three playbooks'
   `Stop Condition` sections and both READMEs state this sequence; changing the
-  flow in `ralph.sh` without updating those texts leaves agents being promised a
-  flow that no longer runs.
+  flow in `lib/story-phase.sh` without updating those texts leaves agents being
+  promised a flow that no longer runs.
 - **The scaffold cleanup round deletes propping, never requirements.** After the
   last story passes and before anything is finalized or merged back, one round
   runs `CLEANUP_SCAFFOLD.md` in the Ralph worktree and strips what the story
@@ -157,12 +167,12 @@ npm test
   `scaffold: <what> - <why>` in the progress record's `learnings.context`.
   Change that declaration format in one place and the cleanup round is back to
   rediscovering everything from the diff.
-  The marker has six consumers: `ralph.sh` (path + check),
-  `lib/scaffold-cleanup.sh` (the predicates), `lib/merge-back.sh` (excluded from
-  both worktree status functions), `lib/sync.sh` (excluded from the overlay),
-  `lib/consolidate.sh` (deleted on archive), and `bin/ralph-kit.mjs` (a
-  protected install path). A new marker path has to visit all six or it ends up
-  in somebody's commit.
+  The marker contract crosses `lib/run-context.sh` (path),
+  `lib/phase-controller.sh` and `lib/scaffold-cleanup.sh` (lifecycle),
+  `lib/merge-back.sh` and `lib/sync.sh` (Git exclusions),
+  `lib/consolidate.sh` (archive cleanup), and
+  `bin/lib/installer/constants.mjs` (protected install paths). A new marker path
+  has to visit every boundary or it ends up in somebody's commit.
 - **A blocked story is a decomposition defect, not a harder story.** The unblock
   round may only restructure when it can name something the criteria require
   that the story itself is not the one to create — a later observation point, a
@@ -171,13 +181,26 @@ npm test
   anything passing. That boundary is the whole thing keeping the round from
   editing failing stories into passing ones, so keep it explicit in
   `UNBLOCK_STORY.md` and do not soften it elsewhere.
+- **The lifecycle has one phase selector.** `lib/phase-controller.sh` owns the
+  priority order `story -> cleanup -> merge-back -> consolidation -> complete`.
+  `lib/story-phase.sh` executes story/unblock work and
+  `lib/wrap-up-phases.sh` executes the wrap-up phases. Add a phase by extending
+  that selector and its executor; do not recreate phase ordering in `ralph.sh`.
+- **The orchestrator has one process executor.** `lib/orchestrator-graph.sh` owns
+  dependency scheduling, `lib/orchestrator-stage.sh` owns explicit stage gates,
+  and both launch, reap, and terminate children only through
+  `lib/orchestrator-executor.sh`. Run discovery stays in `lib/runs.sh`; do not
+  add another directory scan to `orchestrate.sh`.
 
 ## Testing reality
 
-`tests/*.sh` are integration tests driving `ralph.sh` against a fixture repo
-with a stubbed agent CLI. They all exercise **legacy mode** (state at
-`ralph/prd.json`, no run directories). No test covers the run-scoped worktree
-path, so bugs in worktree syncing do not get caught — verify those by hand.
+`tests/run-all.sh` is the ordered test manifest. The suite combines static
+architecture gates, installer/package smoke tests, focused library tests, and
+integration tests driving `ralph.sh` against fixture repositories with stubbed
+agent CLIs. Both legacy state and run-scoped worktree lifecycles are covered,
+including the no-merge scoped path and archive collisions. Add a focused gate
+when introducing a new cross-module boundary; `tests/architecture.sh` keeps the
+entrypoints thin and prevents retired ownership from drifting back.
 
 Nothing that needs a real terminal is covered either: the pinned progress row
 and the orchestrator's status board only render when stdout is a tty, which no

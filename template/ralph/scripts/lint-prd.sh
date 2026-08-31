@@ -89,10 +89,7 @@ if ! command -v jq >/dev/null 2>&1; then
   exit 1
 fi
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-RALPH_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-RUNS_ROOT="$RALPH_ROOT/runs"
-
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/run-context.sh"
 source "$SCRIPT_DIR/lib/run-deps.sh"
 
 # Structural checks that need nothing but the file itself. One message per line.
@@ -327,8 +324,8 @@ lint_depends_on_runs() {
   while IFS= read -r entry; do
     [[ -n "$entry" ]] || continue
 
-    if [[ ! "$entry" =~ ^[A-Za-z0-9._-]+$ ]]; then
-      report_error "$prd_file" "dependsOnRuns entry '$entry' must use only letters, numbers, dot, underscore, and dash"
+    if ! ralph_run_id_is_valid "$entry"; then
+      report_error "$prd_file" "dependsOnRuns entry '$entry' must use only letters, numbers, dot, underscore, and dash; '.' and '..' are not allowed"
       continue
     fi
 
@@ -436,8 +433,8 @@ PRD_FILES=()
 
 case "$MODE" in
   run)
-    if [[ ! "$RUN_ID" =~ ^[A-Za-z0-9._-]+$ ]]; then
-      echo "Error: Invalid run id '$RUN_ID'. Use only letters, numbers, dot, underscore, and dash." >&2
+    if ! ralph_run_id_is_valid "$RUN_ID"; then
+      ralph_print_invalid_run_id "$RUN_ID"
       exit 1
     fi
     if [[ ! -f "$RUNS_ROOT/$RUN_ID/prd.json" ]]; then

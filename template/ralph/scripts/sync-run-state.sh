@@ -32,16 +32,15 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-RALPH_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/run-context.sh"
 
 if [[ "$USE_CURRENT" == "true" ]]; then
-  if [[ -d "$RALPH_ROOT/stories" && -f "$RALPH_ROOT/prd.json" ]]; then
+  if [[ -d "$ROOT_STORIES_DIR" && -f "$ROOT_PRD_FILE" ]]; then
     USE_LEGACY="true"
   else
     mapfile -t current_runs < <(
-      find "$RALPH_ROOT/runs" -mindepth 2 -maxdepth 2 -type d -name stories 2>/dev/null \
-        | sed "s|^$RALPH_ROOT/runs/||; s|/stories$||" \
+      find "$RUNS_ROOT" -mindepth 2 -maxdepth 2 -type d -name stories 2>/dev/null \
+        | sed "s|^$RUNS_ROOT/||; s|/stories$||" \
         | sort
     )
     if [[ "${#current_runs[@]}" -ne 1 ]]; then
@@ -62,22 +61,17 @@ if [[ "$USE_LEGACY" != "true" && -z "$RUN_ID" ]]; then
   exit 1
 fi
 
-if [[ -n "$RUN_ID" && ! "$RUN_ID" =~ ^[A-Za-z0-9._-]+$ ]]; then
-  echo "Error: Invalid run id '$RUN_ID'." >&2
+if [[ -n "$RUN_ID" ]] && ! ralph_run_id_is_valid "$RUN_ID"; then
+  ralph_print_invalid_run_id "$RUN_ID"
   exit 1
 fi
 
 if [[ "$USE_LEGACY" == "true" ]]; then
-  PRD_FILE="$RALPH_ROOT/prd.json"
-  STORIES_DIR="$RALPH_ROOT/stories"
-  PROGRESS_DIR="$RALPH_ROOT/progress"
+  ralph_context_set_root_paths "legacy" ""
 else
-  RUN_DIR="$RALPH_ROOT/runs/$RUN_ID"
-  PRD_FILE="$RUN_DIR/prd.json"
-  STORIES_DIR="$RUN_DIR/stories"
-  PROGRESS_DIR="$RUN_DIR/progress"
+  ralph_context_set_root_paths "scoped" "$RUN_ID"
 fi
-SHARED_MEMORY_FILE="$PROGRESS_DIR/shared-memory.json"
+ralph_context_set_active_paths "$REPO_ROOT" "$RUN_MODE" "$RUN_ID"
 
 if [[ ! -f "$PRD_FILE" ]]; then
   echo "Error: Missing Ralph PRD file: $PRD_FILE" >&2

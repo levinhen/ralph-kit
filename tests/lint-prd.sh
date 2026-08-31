@@ -228,6 +228,10 @@ new_run_prd "needs-bad-charset" '["not a run id"]'
 expect_lint_error "run id charset" \
   "must use only letters, numbers, dot, underscore, and dash" --run needs-bad-charset
 
+new_run_prd "needs-dot-segment" '[".."]'
+expect_lint_error "run id dot segment" \
+  "'.' and '..' are not allowed" --run needs-dot-segment
+
 # A bare path carries no run context, so only the charset check applies.
 jq -n '{
   dependsOnRuns: ["ghost-run"],
@@ -236,7 +240,8 @@ jq -n '{
 expect_lint_ok "bare path skips run existence" "$SCRATCH/bare-deps.json"
 
 rm -rf "$RALPH_ROOT/runs/needs-missing" "$RALPH_ROOT/runs/needs-archived" \
-  "$RALPH_ROOT/runs/needs-self" "$RALPH_ROOT/runs/needs-bad-charset"
+  "$RALPH_ROOT/runs/needs-self" "$RALPH_ROOT/runs/needs-bad-charset" \
+  "$RALPH_ROOT/runs/needs-dot-segment"
 
 # --- Dependency audit ---------------------------------------------------------
 

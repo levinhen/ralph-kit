@@ -335,8 +335,8 @@ silently ignored and never make the command fail.
 - `ralph/status/` — one live status file per run, written every phase and read by the orchestrator's board
 - `ralph/archive/` — completed/consolidated runs and their source PRDs
 - `ralph/locks/` — runtime lock directories
-- `ralph/progress/`, `ralph/stories/`, `ralph/prd.json`, `ralph/progress.txt`, `ralph/state.json`, `ralph/.last-branch`, `ralph/.merge-back-done`, `ralph/.scaffold-cleanup-done` — legacy-mode runtime files
-- An existing `AGENTS.md` — the snippet is printed for you to paste
+- `ralph/progress/`, `ralph/stories/`, `ralph/prd.json`, `ralph/progress.txt`, `ralph/progress.json`, `ralph/state.json`, `ralph/.last-branch`, `ralph/.merge-back-done`, `ralph/.scaffold-cleanup-done`, `ralph/.consolidation-done-*` — runtime files and markers
+- Content outside the `<!-- ralph-kit:begin -->` / `<!-- ralph-kit:end -->` section in `AGENTS.md`. `init` leaves a markerless existing file alone and prints the snippet; `sync` inserts or refreshes only that managed section.
 
 For every other file:
 
@@ -355,6 +355,6 @@ The core Ralph loop (`ralph/scripts/`) is derived from [snarktank/ralph](https:/
 - Companion `/prd` and `/ralph` skills for both Claude Code (`.claude/skills/`) and Codex/pi (`.agents/skills/`).
 - A CLI installer that keeps copies in sync across multiple projects.
 
-> **Note:** the two skills are shipped to both `.claude/skills/` (Claude Code) and `.agents/skills/` (the repo-level skill directory Codex and pi both read) with byte-identical `SKILL.md` content. Edit both copies together — `ralph-kit doctor` flags either one if it drifts from the kit.
+> **Note:** the two skills are installed to both `.claude/skills/` (Claude Code) and `.agents/skills/` (the repo-level skill directory Codex and pi both read) with byte-identical `SKILL.md` content. Their canonical kit source is `template/.agents/skills/`; the installer projects it to both destinations, so there is only one source file to edit.
 
 See [`LICENSE`](./LICENSE) for full copyright notices.

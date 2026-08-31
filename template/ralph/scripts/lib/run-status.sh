@@ -14,10 +14,11 @@
 # that directory into ralph/archive/ and stages the result with `git add -A`,
 # and a runtime status file has no business in a commit.
 #
-# The functions here are the single front door for "the run moved on": each one
-# updates the status file AND the pinned terminal row, so a caller never has to
-# remember to do both. Everything is best-effort - a run must never die because
-# it could not describe itself.
+# This module deliberately owns only the durable JSON projection. The
+# run-observers composition layer fans lifecycle events out to this file and to
+# the interactive progress row. Keeping that wiring out of this module makes
+# status persistence usable on its own (for example in a redirected worker)
+# without requiring any terminal API to have been loaded first.
 
 RALPH_STATUS_FILE=""
 RALPH_STATUS_PRD_FILE=""
@@ -171,14 +172,12 @@ ralph_status_start() {
   ralph_status_write
 }
 
-# The one call site for "the run moved on". It drives the status file and the
-# pinned terminal row together so the two can never disagree about the phase.
+# Persist the latest lifecycle position. Terminal rendering is handled by the
+# run-observers composition layer, not from inside this state store.
 ralph_status_update() {
   local phase="${1:-working}"
   local story_id="${2:-}"
   local round="${3:-0}"
-
-  ralph_progress_update "$phase" "$story_id" "$round" || true
 
   [[ -n "$RALPH_STATUS_FILE" ]] || return 0
 
@@ -203,8 +202,6 @@ ralph_status_update() {
 }
 
 ralph_status_set_activity() {
-  ralph_progress_set_activity "$1" || true
-
   [[ -n "$RALPH_STATUS_FILE" ]] || return 0
   RALPH_STATUS_ACTIVITY_FILE="${1:-}"
   ralph_status_write

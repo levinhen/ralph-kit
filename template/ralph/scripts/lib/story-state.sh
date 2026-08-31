@@ -1,5 +1,8 @@
 #!/bin/bash
 
+_RALPH_STORY_STATE_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$_RALPH_STORY_STATE_LIB_DIR/run-context.sh"
+
 ensure_progress_dir() {
   if [[ -z "$PROGRESS_DIR" || -z "$SHARED_MEMORY_FILE" ]]; then
     return
@@ -23,15 +26,6 @@ story_progress_jsonl_rel() {
   echo "$PROGRESS_REL_DIR/$story_id.jsonl"
 }
 
-validate_story_id_for_file() {
-  local story_id="$1"
-
-  if [[ ! "$story_id" =~ ^[A-Za-z0-9._-]+$ ]]; then
-    echo "Error: Story id '$story_id' cannot be used as a Ralph story filename." >&2
-    exit 1
-  fi
-}
-
 story_file_path() {
   local story_id="$1"
 
@@ -44,6 +38,60 @@ story_rel_path() {
 
   validate_story_id_for_file "$story_id"
   echo "$STORIES_REL_DIR/$story_id.json"
+}
+
+# Read-only PRD queries used by the story loop. Every input is explicit so
+# callers can query root, worktree, or fixture state without first mutating the
+# process-wide run context. Their fallbacks intentionally match the inline jq
+# expressions they replace in ralph.sh.
+prd_next_incomplete_story_id() {
+  local prd_file="$1"
+
+  jq -r '
+    .userStories
+    | map(select(.passes != true))
+    | first
+    | .id // empty
+  ' "$prd_file" 2>/dev/null || echo ""
+}
+
+prd_story_passes() {
+  local prd_file="$1"
+  local story_id="$2"
+
+  jq -r --arg story_id "$story_id" '
+    .userStories[]
+    | select(.id == $story_id)
+    | .passes
+  ' "$prd_file" 2>/dev/null || echo "false"
+}
+
+prd_all_stories_complete() {
+  local prd_file="$1"
+
+  jq -r '
+    if (.userStories | length) == 0 then
+      false
+    else
+      (.userStories | all(.passes == true))
+    end
+  ' "$prd_file" 2>/dev/null || echo "false"
+}
+
+prd_story_ids_summary() {
+  local prd_file="$1"
+
+  jq -r '[.userStories[].id] | join(", ")' "$prd_file" 2>/dev/null \
+    || echo "unreadable"
+}
+
+prd_cleanup_story_list() {
+  local prd_file="$1"
+
+  jq -r '
+    .userStories[]
+    | "- `" + .id + "` " + (.title // "")
+  ' "$prd_file" 2>/dev/null || echo ""
 }
 
 initialize_story_files() {

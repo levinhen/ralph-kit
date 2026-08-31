@@ -2,7 +2,7 @@
 
 [English](./README.md) | 简体中文
 
-一条命令即可把 [Ralph](https://github.com/snarktank/ralph) 自主 agent 循环装进任意项目，并附带配套的 Claude Code 技能（`/prd`、`/ralph`）和 Codex / pi（`AGENTS.md`）集成。
+一条命令即可把 [Ralph](https://github.com/snarktank/ralph) 自主 agent 循环装进任意项目，并附带同时面向 Claude Code、Codex 和 pi 的 `/prd`、`/ralph` 技能，以及 `AGENTS.md` 集成。
 
 一段话概括整个玩法：**你在对话里描述一个需求 → 生成一份由你审阅确认的 PRD → PRD 被拆成一组小而可验证的用户故事 → 一个 shell 循环在隔离的 git worktree 里为每个故事启动一个全新的 AI agent，逐个实现、检查、提交，直到所有故事通过 → 分支合并回基线分支，本次运行的设计决策被沉淀进长期维护的 design ledger，运行目录归档。** 文件就是记忆，git 就是检查点，每次 agent 调用都从干净的上下文窗口开始。
 
@@ -11,6 +11,8 @@
 ```
 .claude/skills/prd/SKILL.md   # /prd 斜杠命令
 .claude/skills/ralph/SKILL.md # /ralph 斜杠命令
+.agents/skills/prd/SKILL.md   # /prd 技能（Codex、pi；内容相同）
+.agents/skills/ralph/SKILL.md # /ralph 技能（Codex、pi；内容相同）
 ralph/
   scripts/                    # 静态循环代码（ralph.sh、orchestrate.sh、lib/、agent 提示词）
   tasks/                      # 进行中的 run 的 PRD markdown（首次使用时创建；安装器永不触碰）
@@ -330,8 +332,8 @@ npx github:levinhen/ralph-kit doctor
 - `ralph/status/` —— 每个 run 一份实时状态文件，每个阶段写入，供编排器状态板读取
 - `ralph/archive/` —— 已完成/已沉淀的 run 及其源 PRD markdown
 - `ralph/locks/` —— 运行时锁目录
-- `ralph/progress/`、`ralph/stories/`、`ralph/prd.json`、`ralph/progress.txt`、`ralph/state.json`、`ralph/.last-branch`、`ralph/.merge-back-done`、`ralph/.scaffold-cleanup-done` —— legacy 模式的运行时文件
-- 已存在的 `AGENTS.md` —— 片段会打印出来，由你自行粘贴
+- `ralph/progress/`、`ralph/stories/`、`ralph/prd.json`、`ralph/progress.txt`、`ralph/progress.json`、`ralph/state.json`、`ralph/.last-branch`、`ralph/.merge-back-done`、`ralph/.scaffold-cleanup-done`、`ralph/.consolidation-done-*` —— 运行时文件和标记
+- `AGENTS.md` 中 `<!-- ralph-kit:begin -->` / `<!-- ralph-kit:end -->` 之外的内容。`init` 遇到没有标记的已有文件时不会改动，只打印片段；`sync` 只插入或刷新该托管区段。
 
 其余每个文件：
 
@@ -347,7 +349,9 @@ npx github:levinhen/ralph-kit doctor
 
 - 多 agent 支持（`CLAUDE.md` + `CODEX.md` + `PI.md` 按 agent 区分的提示词）。
 - run 作用域布局（`runs/<run_id>/`），含脚手架清理、merge-back 与 consolidation 回合。
-- 配套 Claude Code 技能（`/prd`、`/ralph`）。
+- 同时安装到 Claude Code（`.claude/skills/`）和 Codex / pi（`.agents/skills/`）的 `/prd`、`/ralph` 技能。
 - 一个跨项目保持副本同步的 CLI 安装器。
+
+> **说明：** 两套安装目标收到字节一致的 `SKILL.md`，但 kit 内只有 `template/.agents/skills/` 这一份规范源；安装器会把它投影到两个目标，因此维护时只改一处。
 
 完整版权说明见 [`LICENSE`](./LICENSE)。

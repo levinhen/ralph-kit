@@ -6,7 +6,11 @@
   "author": "levinhen",
   "type": "module",
   "scripts": {
-    "test": "bash tests/story-unblock.sh && bash tests/scaffold-cleanup.sh && bash tests/run-status.sh && bash tests/pi-tool.sh && bash tests/pi-stream-extensions.sh && bash tests/story-budget.sh && bash tests/orchestrator-stage-gate.sh && bash tests/lint-prd.sh && bash tests/orchestrator-graph.sh"
+    "test": "bash tests/run-all.sh",
+    "test:static": "bash tests/static-checks.sh",
+    "test:installer": "bash tests/installer.sh",
+    "test:scoped": "bash tests/scoped-lifecycle.sh",
+    "test:package": "bash tests/package-smoke.sh"
   },
   "bin": {
     "ralph-kit": "bin/ralph-kit.mjs"

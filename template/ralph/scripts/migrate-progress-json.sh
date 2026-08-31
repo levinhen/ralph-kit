@@ -7,8 +7,7 @@
 
 set -e
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-RALPH_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/run-context.sh"
 
 split_one() {
   local source_json="$1"
@@ -30,7 +29,7 @@ split_one() {
     story_id="${story_id//$'\r'/}"
     story_id="${story_id//$'\n'/}"
     [[ -n "$story_id" ]] || continue
-    if [[ ! "$story_id" =~ ^[A-Za-z0-9._-]+$ ]]; then
+    if ! ralph_story_id_is_valid "$story_id"; then
       echo "  Skipping invalid story id: $story_id" >&2
       continue
     fi

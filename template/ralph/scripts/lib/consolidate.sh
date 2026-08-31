@@ -57,8 +57,9 @@ archive_run_prd_doc() {
   fi
 
   if [[ -e "$target" ]]; then
-    echo "Ralph consolidation: PRD archive target already exists, leaving ralph/tasks/prd-$RUN_ID.md in place: $target"
-    return 0
+    echo "Error: Ralph consolidation PRD archive target already exists: $target" >&2
+    echo "Refusing to archive ralph/tasks/prd-$RUN_ID.md; both PRD files were left in place." >&2
+    return 1
   fi
 
   mkdir -p "$archive_dir"
@@ -80,8 +81,9 @@ archive_consolidated_run() {
     archive_target="$archive_root/$archive_name"
 
     if [[ -e "$archive_target" ]]; then
-      echo "Ralph consolidation: archive target already exists, skipping mv: $archive_target"
-      return 0
+      echo "Error: Ralph consolidation archive target already exists: $archive_target" >&2
+      echo "Refusing to archive run $RUN_ID; the active run dir and source PRD were left in place." >&2
+      return 1
     fi
 
     mkdir -p "$archive_root"
@@ -101,7 +103,7 @@ archive_consolidated_run() {
     fi
   fi
 
-  archive_run_prd_doc "$archive_target"
+  archive_run_prd_doc "$archive_target" || return $?
 
   git -C "$REPO_ROOT" add -A "ralph/runs/" "ralph/archive/" >/dev/null 2>&1 || true
 

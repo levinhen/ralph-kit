@@ -2,20 +2,9 @@
 
 # run_prd_all_passed / run_merge_back_complete live in run-deps.sh so ralph.sh,
 # archive-runs.sh, and lint-prd.sh all judge run completion the same way.
-source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/run-deps.sh"
-
-sanitize_branch_name() {
-  echo "$1" | sed 's|^refs/heads/||; s|[/:\\]|-|g'
-}
-
-validate_run_id() {
-  local run_id="$1"
-
-  if [[ ! "$run_id" =~ ^[A-Za-z0-9._-]+$ ]]; then
-    echo "Error: Invalid run id '$run_id'. Use only letters, numbers, dot, underscore, and dash."
-    exit 1
-  fi
-}
+_RALPH_RUNS_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$_RALPH_RUNS_LIB_DIR/run-context.sh"
+source "$_RALPH_RUNS_LIB_DIR/run-deps.sh"
 
 run_is_complete() {
   local run_dir="$1"

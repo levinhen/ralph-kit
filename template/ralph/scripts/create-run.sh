@@ -29,19 +29,14 @@ done
 RUN_ID="${1:-}"
 SOURCE_PRD="${2:-}"
 
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/run-context.sh"
+
 if [[ -z "$RUN_ID" ]]; then
   echo "Usage: $0 [--force] <run_id> [source_prd_json]"
   exit 1
 fi
 
-if [[ ! "$RUN_ID" =~ ^[A-Za-z0-9._-]+$ ]]; then
-  echo "Error: Invalid run id '$RUN_ID'. Use only letters, numbers, dot, underscore, and dash."
-  exit 1
-fi
-
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-RALPH_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-REPO_ROOT="$(cd "$RALPH_ROOT/.." && pwd)"
+validate_run_id "$RUN_ID"
 
 require_git_base() {
   if ! git -C "$REPO_ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
@@ -79,12 +74,12 @@ fi
 
 require_git_base
 
-RUN_DIR="$RALPH_ROOT/runs/$RUN_ID"
-TARGET_PRD="$RUN_DIR/prd.json"
-PROGRESS_FILE="$RUN_DIR/progress.txt"
-PROGRESS_DIR="$RUN_DIR/progress"
-SHARED_MEMORY_FILE="$PROGRESS_DIR/shared-memory.json"
-STATE_FILE="$RUN_DIR/state.json"
+ralph_context_set_root_paths "scoped" "$RUN_ID"
+TARGET_PRD="$ROOT_PRD_FILE"
+PROGRESS_FILE="$ROOT_PROGRESS_FILE"
+PROGRESS_DIR="$ROOT_PROGRESS_DIR"
+SHARED_MEMORY_FILE="$ROOT_SHARED_MEMORY_FILE"
+STATE_FILE="$ROOT_STATE_FILE"
 
 if [[ -e "$RUN_DIR" && "$FORCE" != "true" ]]; then
   echo "Error: Ralph run already exists: $RUN_DIR"

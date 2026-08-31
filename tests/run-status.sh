@@ -313,4 +313,77 @@ if grep -q $'\033' "$BOARD_PROBE"; then
   exit 1
 fi
 
+# A row read out of a status file with no current story - every merge-back,
+# cleanup and consolidation round writes one - must still line the fields up.
+# The board used to parse the file as a single tab-separated row, and bash folds
+# consecutive tabs into one delimiter even when IFS is only a tab, so the two
+# empty fields shifted everything after them left and the row printed the phase
+# clock where the story count belongs.
+mkdir -p "$TEST_ROOT/board-fields"
+cat > "$TEST_ROOT/board-fields/run-mb.json" <<'EOF'
+{
+  "runId": "run-mb",
+  "phase": "merge-back",
+  "storyId": "",
+  "storyTitle": "",
+  "round": 10,
+  "storiesTotal": 7,
+  "storiesDone": 7,
+  "phaseStartedAt": 1788156125,
+  "unblockRounds": 1,
+  "unblockOutcome": "finished"
+}
+EOF
+
+FIELDS_PROBE="$TEST_ROOT/board-fields-probe"
+bash -c '
+  . "'"$TEMPLATE_RALPH"'/scripts/lib/log.sh"
+  . "'"$TEMPLATE_RALPH"'/scripts/lib/status-board.sh"
+  # The board never activates without a tty, so stand the state up by hand:
+  # ralph_board_row only fills the line buffer, it writes nothing itself.
+  RALPH_BOARD_ACTIVE="true"
+  RALPH_BOARD_ROWS=24
+  RALPH_BOARD_COLS=100
+  RALPH_BOARD_HEIGHT=4
+  RALPH_BOARD_STATUS_DIR="'"$TEST_ROOT"'/board-fields"
+  ralph_board_begin_frame
+  ralph_board_row "run-mb" "running" ""
+  printf "%s\n" "${RALPH_BOARD_LINES[0]}"
+' > "$FIELDS_PROBE" 2>&1
+
+if grep -q "1788156125" "$FIELDS_PROBE"; then
+  echo "--- board row ---" >&2
+  cat "$FIELDS_PROBE" >&2
+  echo "The board printed the phase clock as a story count: its fields are misaligned" >&2
+  exit 1
+fi
+
+if ! grep -q "merge-back" "$FIELDS_PROBE"; then
+  echo "--- board row ---" >&2
+  cat "$FIELDS_PROBE" >&2
+  echo "The board lost the phase label" >&2
+  exit 1
+fi
+
+if ! grep -q "7/7" "$FIELDS_PROBE"; then
+  echo "--- board row ---" >&2
+  cat "$FIELDS_PROBE" >&2
+  echo "The board did not report the story counts" >&2
+  exit 1
+fi
+
+if ! grep -q "r10" "$FIELDS_PROBE"; then
+  echo "--- board row ---" >&2
+  cat "$FIELDS_PROBE" >&2
+  echo "The board did not report the round number" >&2
+  exit 1
+fi
+
+if ! grep -q "unblocked x1" "$FIELDS_PROBE"; then
+  echo "--- board row ---" >&2
+  cat "$FIELDS_PROBE" >&2
+  echo "The board lost the unblock verdict" >&2
+  exit 1
+fi
+
 echo "run status integration test: ok"

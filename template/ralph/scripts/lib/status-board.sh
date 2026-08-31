@@ -175,24 +175,39 @@ ralph_board_row() {
   unblock_outcome=""
 
   if [[ -f "$status_file" ]]; then
-    # Tabs separate the fields: a story title can contain anything except a
-    # control character, and jq's @tsv escapes what is left.
+    # One field per line, never a shared separator. Tab counts as IFS
+    # whitespace even when IFS holds nothing but a tab, so bash folds a run of
+    # them into a single delimiter: a @tsv row with an empty storyId and
+    # storyTitle - which is every merge-back, cleanup and consolidation round -
+    # shifts every later field two places left, and the row ends up printing
+    # the phase clock as the story count. The title is the only field that can
+    # carry whitespace, and jq flattens it before it gets here.
     fields=$(jq -r '
-      [
-        (.phase // ""),
-        (.storyId // ""),
-        ((.storyTitle // "") | gsub("[[:space:]]+"; " ")),
-        (.round // 0),
-        (.storiesDone // 0),
-        (.storiesTotal // 0),
-        (.phaseStartedAt // 0),
-        (.unblockRounds // 0),
-        (.unblockOutcome // "")
-      ] | @tsv
+      (.phase // ""),
+      (.storyId // ""),
+      ((.storyTitle // "") | gsub("[[:space:]]+"; " ")),
+      (.round // 0),
+      (.storiesDone // 0),
+      (.storiesTotal // 0),
+      (.phaseStartedAt // 0),
+      (.unblockRounds // 0),
+      (.unblockOutcome // "")
     ' "$status_file" 2>/dev/null || echo "")
     if [[ -n "$fields" ]]; then
-      IFS=$'\t' read -r phase story_id story_title round done_count total \
-        phase_started unblock_rounds unblock_outcome <<< "$fields"
+      # A trailing empty field is stripped by the command substitution, so the
+      # last reads can legitimately find nothing. The locals above already hold
+      # the fallback.
+      {
+        IFS= read -r phase || true
+        IFS= read -r story_id || true
+        IFS= read -r story_title || true
+        IFS= read -r round || true
+        IFS= read -r done_count || true
+        IFS= read -r total || true
+        IFS= read -r phase_started || true
+        IFS= read -r unblock_rounds || true
+        IFS= read -r unblock_outcome || true
+      } <<< "$fields"
     fi
   fi
 

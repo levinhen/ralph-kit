@@ -42,9 +42,17 @@
 #   - A 429/rate-limit response stops the in-flight runs and the orchestrator.
 #   - --dry-run prints the edges and a topological wave preview, then exits.
 #
+# Terminal:
+#   Parallel runs go to log files, so nothing they print reaches this terminal.
+#   Each run writes its live state to ralph/status/<run_id>.json instead, and a
+#   status board is pinned to the bottom of this terminal - one row per run,
+#   with the phase, current story, round and clock. It only ever writes to
+#   /dev/tty, so redirected output stays plain text.
+#
 # Environment:
 #   RALPH_PLAN     Default plan string (overridden by --plan, ignored by --graph).
 #   RALPH_NOTIFY=0 Disable Ralph's per-run desktop notifications.
+#   RALPH_BOARD=0  Disable the status board.
 
 set -e
 
@@ -84,7 +92,7 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     -h|--help)
-      sed -n '2,47p' "$0" | sed 's/^# \{0,1\}//'
+      sed -n '2,55p' "$0" | sed 's/^# \{0,1\}//'
       exit 0
       ;;
     *)
@@ -133,6 +141,14 @@ fi
 # run_prd_all_passed, run_merge_back_complete, run_dependency_satisfied.
 # shellcheck source=lib/run-deps.sh
 . "$SCRIPT_DIR/lib/run-deps.sh"
+
+# ralph_log_sgr, for the board's semantic colours.
+# shellcheck source=lib/log.sh
+. "$SCRIPT_DIR/lib/log.sh"
+# shellcheck source=lib/status-board.sh
+. "$SCRIPT_DIR/lib/status-board.sh"
+
+STATUS_ROOT="$RALPH_ROOT/status"
 
 run_is_complete() {
   local run_dir="$1"
@@ -223,10 +239,23 @@ terminate_orchestrated_runs() {
 }
 
 cleanup_on_signal() {
+  ralph_board_stop || true
   terminate_orchestrated_runs
   exit 130
 }
 trap cleanup_on_signal INT TERM
+trap 'ralph_board_resize || true' WINCH
+
+# Every scheduled run gets a fresh status file. A leftover from an earlier
+# orchestrator would otherwise be rendered as this run's live state, and a
+# stale "unblocking" row is worse than an empty one.
+clear_stale_status_files() {
+  local idx=0
+  while [[ $idx -lt $TOTAL_RUNS ]]; do
+    rm -f "$STATUS_ROOT/${INCOMPLETE_RUNS[$idx]}.json" 2>/dev/null || true
+    idx=$((idx + 1))
+  done
+}
 
 # --- Graph mode ---------------------------------------------------------------
 
@@ -501,6 +530,61 @@ graph_propagate_blocks() {
 
 # Returns 0 when every run succeeded, RALPH_RATE_LIMIT_EXIT_CODE on a rate limit,
 # 1 when anything failed or was blocked.
+# What a pending run is still waiting for. The scheduler already knows; without
+# it the row would just say "pending" for however long the upstream takes.
+graph_pending_note() {
+  local idx="$1" dep
+  for dep in ${GRAPH_DEPS[$idx]}; do
+    if [[ "${GRAPH_STATE[$dep]}" != "succeeded" ]]; then
+      printf '<- %s' "${INCOMPLETE_RUNS[$dep]}"
+      return 0
+    fi
+  done
+}
+
+# One board frame from the scheduler's state plus each run's status file.
+# Running runs are drawn first: when the terminal cannot hold every row, the
+# ones being dropped should be the ones nothing is happening in.
+graph_render_board() {
+  local idx pass note
+  local running=0 succeeded=0 failed=0
+
+  ralph_board_begin_frame
+
+  idx=0
+  while [[ $idx -lt $TOTAL_RUNS ]]; do
+    case "${GRAPH_STATE[$idx]}" in
+      running) running=$((running + 1)) ;;
+      succeeded) succeeded=$((succeeded + 1)) ;;
+      failed | stopped) failed=$((failed + 1)) ;;
+    esac
+    idx=$((idx + 1))
+  done
+
+  for pass in running other; do
+    idx=0
+    while [[ $idx -lt $TOTAL_RUNS ]]; do
+      if [[ "$pass" == "running" && "${GRAPH_STATE[$idx]}" != "running" ]] \
+        || [[ "$pass" == "other" && "${GRAPH_STATE[$idx]}" == "running" ]]; then
+        idx=$((idx + 1))
+        continue
+      fi
+
+      note=""
+      case "${GRAPH_STATE[$idx]}" in
+        blocked) note="<- ${GRAPH_BLOCKER[$idx]}" ;;
+        pending) note="$(graph_pending_note "$idx")" ;;
+        failed | stopped) note="exit ${GRAPH_RC[$idx]}" ;;
+      esac
+
+      ralph_board_row "${INCOMPLETE_RUNS[$idx]}" "${GRAPH_STATE[$idx]}" "$note"
+      idx=$((idx + 1))
+    done
+  done
+
+  ralph_board_end_frame "$running" "$succeeded" "$failed"
+}
+
 graph_execute() {
   local idx rc reaped running rate_limited=0
 
@@ -508,6 +592,9 @@ graph_execute() {
   echo "==============================================================="
   echo "  Graph execution: $TOTAL_RUNS run(s)"
   echo "==============================================================="
+
+  clear_stale_status_files
+  ralph_board_start "$STATUS_ROOT" "$TOTAL_RUNS"
 
   while true; do
     graph_launch_ready
@@ -566,16 +653,19 @@ graph_execute() {
         idx=$((idx + 1))
       done
       graph_propagate_blocks
+      ralph_board_stop
       return "$RALPH_RATE_LIMIT_EXIT_CODE"
     fi
 
     graph_propagate_blocks
+    graph_render_board
 
     if [[ "$reaped" -eq 0 ]]; then
       sleep 1
     fi
   done
 
+  ralph_board_stop
   ORCH_PIDS=()
   idx=0
   while [[ $idx -lt $TOTAL_RUNS ]]; do
@@ -859,6 +949,41 @@ fi
 
 # --- Execution (stage mode) ---------------------------------------------------
 
+STAGE_NAMES=()
+STAGE_STATES=()
+STAGE_RCS=()
+
+# One board frame for the runs of the current parallel stage. A stage has no
+# pending or blocked runs - everything in it launched together - so the frame is
+# simply every sibling in launch order.
+stage_render_board() {
+  local idx=0 note
+  local running=0 succeeded=0 failed=0
+
+  ralph_board_begin_frame
+
+  while [[ $idx -lt ${#STAGE_NAMES[@]} ]]; do
+    case "${STAGE_STATES[$idx]}" in
+      running) running=$((running + 1)) ;;
+      succeeded) succeeded=$((succeeded + 1)) ;;
+      failed) failed=$((failed + 1)) ;;
+    esac
+    idx=$((idx + 1))
+  done
+
+  idx=0
+  while [[ $idx -lt ${#STAGE_NAMES[@]} ]]; do
+    note=""
+    if [[ "${STAGE_STATES[$idx]}" == "failed" ]]; then
+      note="exit ${STAGE_RCS[$idx]:-?}"
+    fi
+    ralph_board_row "${STAGE_NAMES[$idx]}" "${STAGE_STATES[$idx]}" "$note"
+    idx=$((idx + 1))
+  done
+
+  ralph_board_end_frame "$running" "$succeeded" "$failed"
+}
+
 execute_stage() {
   local stage_num="$1"
   shift
@@ -899,9 +1024,20 @@ execute_stage() {
     return "$rc"
   fi
 
-  # Parallel: redirect each run to its own log file.
-  local pids=() logs=() names=()
+  # Parallel: redirect each run to its own log file. Nothing they print reaches
+  # this terminal from here on, so the board is what keeps the stage legible.
+  local pids=() logs=()
   local run_id log_file
+  # STAGE_NAMES/STAGE_STATES are script-level so stage_render_board can read
+  # them: bash 3.2, the macOS system shell, has no name references to pass an
+  # array into a function with.
+  STAGE_NAMES=()
+  STAGE_STATES=()
+  STAGE_RCS=()
+  for run_id in "${runs[@]}"; do
+    rm -f "$STATUS_ROOT/$run_id.json" 2>/dev/null || true
+  done
+  ralph_board_start "$STATUS_ROOT" "${#runs[@]}"
   for run_id in "${runs[@]}"; do
     log_file="$RUNS_ROOT/$run_id/orchestrator-$TIMESTAMP.log"
     mkdir -p "$(dirname "$log_file")"
@@ -912,7 +1048,8 @@ execute_stage() {
     "$RALPH_SCRIPT" "${args[@]}" >"$log_file" 2>&1 &
     pids+=($!)
     logs+=("$log_file")
-    names+=("$run_id")
+    STAGE_NAMES+=("$run_id")
+    STAGE_STATES+=("running")
   done
 
   ORCH_PIDS=("${pids[@]}")
@@ -941,13 +1078,18 @@ execute_stage() {
       rc=0
       wait "${pids[$k]}" || rc=$?
       if [[ "$rc" -eq 0 ]]; then
-        echo "  [stage $stage_num] ${names[$k]}: ok"
+        STAGE_STATES[$k]="succeeded"
+        echo "  [stage $stage_num] ${STAGE_NAMES[$k]}: ok"
       elif [[ "$rc" -eq "$RALPH_RATE_LIMIT_EXIT_CODE" ]]; then
-        echo "  [stage $stage_num] ${names[$k]}: rate-limited (exit $rc, see ${logs[$k]})" >&2
+        STAGE_STATES[$k]="failed"
+        STAGE_RCS[$k]="$rc"
+        echo "  [stage $stage_num] ${STAGE_NAMES[$k]}: rate-limited (exit $rc, see ${logs[$k]})" >&2
         stage_rate_limited=1
         stage_failed=1
       else
-        echo "  [stage $stage_num] ${names[$k]}: FAILED (exit $rc, see ${logs[$k]})" >&2
+        STAGE_STATES[$k]="failed"
+        STAGE_RCS[$k]="$rc"
+        echo "  [stage $stage_num] ${STAGE_NAMES[$k]}: FAILED (exit $rc, see ${logs[$k]})" >&2
         stage_failed=1
       fi
     done
@@ -955,16 +1097,19 @@ execute_stage() {
     # A rate limit is the one failure that cuts the stage short: the remaining
     # runs would only burn requests against the same exhausted quota.
     if [[ "$stage_rate_limited" -eq 1 ]]; then
+      ralph_board_stop
       terminate_orchestrated_runs
       break
     fi
 
     pending=("${still[@]}")
+    stage_render_board
     if [[ ${#pending[@]} -gt 0 && "$reaped" -eq 0 ]]; then
       sleep 1
     fi
   done
 
+  ralph_board_stop
   ORCH_PIDS=()
   if [[ "$stage_rate_limited" -eq 1 ]]; then
     return "$RALPH_RATE_LIMIT_EXIT_CODE"

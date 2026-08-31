@@ -159,6 +159,24 @@ Ralph:20260817-a [█████░░░░░░░░░░░] 3/8 done | U
 
 后台心跳每 `RALPH_PROGRESS_TICK_SECONDS` 秒（默认 2）重绘一次，因此 agent 静默时计时仍在走；Ralph 被强杀时它也会自行恢复终端。输出被重定向到文件（包括并行编排日志）时会自动关闭——控制码只写 `/dev/tty`，绝不会进日志；设置 `RALPH_PROGRESS=0` 也可手动关闭。
 
+### 看住并行的 run：编排器状态板
+
+进度栏要求两条输出流都是终端，而 `orchestrate.sh` 会把每个并行 run 重定向到各自的日志文件——所以在那些 run 内部，进度栏根本不会启动。为了不让编排器自己的终端在「启动」和最终 `ok`/`FAILED` 之间彻底沉默，每个 run 还会无条件把状态写进 `ralph/status/<run_id>.json`，编排器则在**自己**终端的底部为每个 run 钉一行：
+
+```
+ ● 20260817-auth    story       3/8 US-004 r7 4m12s  补齐成本统计
+ ⚑ 20260817-bill    unblock     1/5 US-002 r4 3m11s  展示账单明细行
+ ○ 20260817-report  pending     <- 20260817-auth
+ ✓ 20260817-search  done        6/6 [resplit x1]
+ 2 running  1 done  0 failed  - logs under ralph/runs/<run>/
+```
+
+各行沿用下方日志的同一套配色，所以修复轮在状态板上是黄色，理由和它的横幅是黄色完全一样。`[resplit x1]` / `[unblocked x1]` / `[unblock gave up]` 会留在已完成 run 的行上：对一个输出全进了文件的 run 来说，那一轮是最值得知道的事，否则它就埋在成千上万行 agent 输出里了。
+
+正在跑的 run 优先绘制，因此当 run 数量超过状态板容量（它最多占终端的一半，且不超过 12 行）时，被折进 `(+N more)` 计数的都是没有动静的那些。`RALPH_BOARD=0` 可以关掉它。和这里的其他东西一样，状态板只写 `/dev/tty`；各 run 的日志文件仍是纯文本。
+
+这些状态文件本身也可以直接读——在第二个终端里 `jq . ralph/status/*.json` 就能回答「这个 run 现在跑到哪了」，完全不用碰编排器。它们特意不放在 `ralph/runs/` 下：consolidation 会归档并暂存那个目录，而运行时状态不该进提交。
+
 ### 日志配色
 
 一轮会刷出成千上万行 agent 输出，因此真正说明「循环走到哪一步」的那几行是带颜色的。同一种颜色始终表示同一件事：
@@ -256,6 +274,7 @@ ralph/scripts/orchestrate.sh --tool claude --plan "1 > 2,3 > 4"   # 手工阶段
 | `RALPH_TOOL_TIMEOUT_SECONDS` | `0`（关闭） | 单次调用硬上限 |
 | `RALPH_SHARED_MEMORY_ITEMS` / `RALPH_STORY_PROGRESS_RECORDS` | `40` / `5` | prompt 记忆切片大小 |
 | `RALPH_PROGRESS` | `1` | 交互式终端底部的常驻故事进度栏；设为 `0` 关闭 |
+| `RALPH_BOARD` | `1` | 编排器状态板（每个并行 run 一行）；设为 `0` 关闭 |
 | `RALPH_PROGRESS_IDLE_MIN` | `30` | agent 静默多少秒后显示空闲计时 |
 | `RALPH_LOG_COLOR` | `auto` | 循环自身状态行的配色；`0` 强制纯文本，`1` 即使被重定向也强制上色（`NO_COLOR` 同样可关闭）|
 | `RALPH_MAX_FINALIZE_ROUNDS` / `RALPH_MAX_MERGE_BACK_ROUNDS` / `RALPH_MAX_CONSOLIDATION_ROUNDS` | 各 `3` | 单个收尾轮最多自我重试几次，超出就停下 |
@@ -294,6 +313,7 @@ npx github:levinhen/ralph-kit doctor
 
 - `ralph/tasks/` —— `/prd` 技能写出的 PRD markdown
 - `ralph/runs/` —— 进行中的 Ralph run
+- `ralph/status/` —— 每个 run 一份实时状态文件，每个阶段写入，供编排器状态板读取
 - `ralph/archive/` —— 已完成/已沉淀的 run 及其源 PRD markdown
 - `ralph/locks/` —— 运行时锁目录
 - `ralph/progress/`、`ralph/stories/`、`ralph/prd.json`、`ralph/progress.txt`、`ralph/state.json`、`ralph/.last-branch`、`ralph/.merge-back-done` —— legacy 模式的运行时文件

@@ -91,6 +91,10 @@ CONSOLIDATION_STATE_REL_PATH=""
 WORKTREE_ROOT="$REPO_ROOT/.worktrees"
 RUNS_ROOT="$RALPH_ROOT/runs"
 LOCK_ROOT="$RALPH_ROOT/locks"
+# Live run status, one file per run, read by orchestrate.sh while the run is
+# redirected to a log file. Kept out of ralph/runs/ on purpose: consolidation
+# archives that directory and stages it, and this is throwaway runtime state.
+STATUS_ROOT="$RALPH_ROOT/status"
 
 RUN_MODE=""
 ACTIVE_TOOL_PID=""
@@ -118,6 +122,9 @@ source "$LIB_DIR/tools.sh"
 source "$LIB_DIR/story-state.sh"
 source "$LIB_DIR/usage.sh"
 source "$LIB_DIR/progress-bar.sh"
+# After progress-bar.sh: run-status.sh wraps it, so the wrapped functions have
+# to exist first.
+source "$LIB_DIR/run-status.sh"
 source "$LIB_DIR/merge-back.sh"
 source "$LIB_DIR/consolidate.sh"
 
@@ -169,8 +176,20 @@ if [[ "$RUN_MODE" == "scoped" ]]; then
 fi
 
 cleanup() {
+  # First statement in the trap, so it reads the exit status that fired it
+  # rather than whatever the lines below leave behind.
+  local exit_code=$?
+
   # Release the pinned row first so shutdown messages scroll normally.
   ralph_progress_stop || true
+  # Stamp the terminal state before anything else can fail: the orchestrator
+  # reaps this child within a second of it exiting, and a status file frozen on
+  # the last live phase would read as a run still working.
+  if [[ "$exit_code" -eq 0 ]]; then
+    ralph_status_finish "succeeded" "$exit_code" || true
+  else
+    ralph_status_finish "failed" "$exit_code" || true
+  fi
   # The bill goes out on every exit path, including Ctrl-C: an interrupted run
   # still spent the tokens, and this is the last chance to say how many.
   ralph_usage_report || true
@@ -506,6 +525,10 @@ if [[ -z "$PROGRESS_LABEL" && -n "$TARGET_BRANCH" ]]; then
   PROGRESS_LABEL="${TARGET_BRANCH##*/}"
 fi
 ralph_progress_start "$PRD_FILE" "$PROGRESS_LABEL"
+# The status file tracks the worktree's PRD, not the root's: story passes land
+# in the worktree copy every round, while the root copy only catches up at
+# merge-back. A watcher wants the live number, not the merged one.
+ralph_status_start "$STATUS_ROOT" "$PRD_FILE" "$RUN_ID_LABEL" "$TOOL"
 
 # Story rounds are self-limiting: a story that does not reach passes=true gets
 # one unblock round below, which either finishes it, restructures the backlog
@@ -559,7 +582,7 @@ while true; do
   ' "$PRD_FILE" 2>/dev/null || echo "")
 
   if [[ -n "$CURRENT_STORY_ID" ]]; then
-    ralph_progress_update "working" "$CURRENT_STORY_ID" "$ROUND"
+    ralph_status_update "working" "$CURRENT_STORY_ID" "$ROUND"
     rm -f "$MERGE_BACK_STATE_FILE"
     [[ -n "$CONSOLIDATION_STATE_FILE" ]] && rm -f "$CONSOLIDATION_STATE_FILE"
     # Back in the story phase, so the wrap-up markers above were just cleared
@@ -571,7 +594,7 @@ while true; do
 
   if [[ -z "$CURRENT_STORY_ID" ]]; then
     if merge_back_needed && ! merge_back_done; then
-      ralph_progress_update "merge-back" "" "$ROUND"
+      ralph_status_update "merge-back" "" "$ROUND"
       echo ""
       ralph_log_banner merge "Ralph Merge-Back Round ($TOOL) - $TARGET_BRANCH -> $BASE_BRANCH"
 
@@ -580,7 +603,7 @@ while true; do
         if [[ "$FINALIZE_ROUNDS" -gt "$MAX_FINALIZE_ROUNDS" ]]; then
           wrap_up_budget_exhausted "worktree finalization" "$MAX_FINALIZE_ROUNDS"
         fi
-        ralph_progress_update "finalizing" "" "$ROUND"
+        ralph_status_update "finalizing" "" "$ROUND"
         if run_target_worktree_finalization; then
           ralph_log_line success "Ralph target worktree is clean. The next round will start merge-back."
         fi
@@ -653,7 +676,7 @@ EOF
         wrap_up_budget_exhausted "consolidation" "$MAX_CONSOLIDATION_ROUNDS"
       fi
 
-      ralph_progress_update "consolidating" "" "$ROUND"
+      ralph_status_update "consolidating" "" "$ROUND"
       echo ""
       ralph_log_banner consolidate "Ralph Consolidation Round ($TOOL) - $RUN_ID -> design-ledger"
 
@@ -684,7 +707,7 @@ EOF
       CONSOLIDATE_PROMPT_FILE=""
 
       if consolidation_done; then
-        ralph_progress_update "complete" "" "$ROUND"
+        ralph_status_update "complete" "" "$ROUND"
         archive_consolidated_run
         echo ""
         if merge_back_needed; then
@@ -711,7 +734,7 @@ EOF
       archive_consolidated_run
     fi
 
-    ralph_progress_update "complete" "" "$ROUND"
+    ralph_status_update "complete" "" "$ROUND"
     echo ""
     ralph_log_line success "Ralph completed all tasks!"
     ralph_log_line success "All stories in $PRD_FILE already have passes=true"
@@ -752,7 +775,7 @@ EOF
 
   sync_story_files_to_prd_after_iteration "$PRE_ITERATION_HEAD"
   FAILED_ROUND_AFTER_HEAD=$(git -C "$ACTIVE_WORKTREE" rev-parse --verify HEAD 2>/dev/null || echo "")
-  ralph_progress_update "checking" "$CURRENT_STORY_ID" "$ROUND"
+  ralph_status_update "checking" "$CURRENT_STORY_ID" "$ROUND"
 
   STORY_PASSED=$(jq -r --arg story_id "$CURRENT_STORY_ID" '
     .userStories[]
@@ -776,7 +799,7 @@ EOF
     # every ordinary round and say nothing about the structure.
     PRE_UNBLOCK_STRUCTURE=$(prd_structure_fingerprint)
 
-    ralph_progress_update "unblocking" "$CURRENT_STORY_ID" "$ROUND"
+    ralph_status_update "unblocking" "$CURRENT_STORY_ID" "$ROUND"
     echo ""
     ralph_log_banner unblock "Ralph Story Unblock Round ($TOOL) - Target: $CURRENT_STORY_ID"
     ralph_log_line unblock "The failed story is not retried blindly. One round decides whether it is genuinely blocked, then finishes it or restructures the backlog around it."
@@ -811,7 +834,7 @@ EOF
     UNBLOCK_DIAGNOSTIC_FILE="$LAST_TOOL_DIAGNOSTIC_FILE"
 
     sync_story_files_to_prd_after_iteration "$UNBLOCK_HEAD_BEFORE"
-    ralph_progress_update "checking" "$CURRENT_STORY_ID" "$ROUND"
+    ralph_status_update "checking" "$CURRENT_STORY_ID" "$ROUND"
 
     STORY_PASSED=$(jq -r --arg story_id "$CURRENT_STORY_ID" '
       .userStories[]
@@ -820,6 +843,7 @@ EOF
     ' "$PRD_FILE" 2>/dev/null || echo "false")
 
     if [[ "$STORY_PASSED" == "true" ]]; then
+      ralph_status_unblock_outcome "finished" || true
       echo ""
       ralph_log_line success "Ralph finished $CURRENT_STORY_ID in the unblock round: it was unfinished, not blocked."
       # Hand back to the top of the loop rather than deciding anything here: the
@@ -835,6 +859,7 @@ EOF
     # the next round starts on whatever the new split puts first.
     if [[ "$(prd_structure_fingerprint)" != "$PRE_UNBLOCK_STRUCTURE" ]]; then
       RESTRUCTURES=$((RESTRUCTURES + 1))
+      ralph_status_unblock_outcome "restructured" || true
       echo ""
       ralph_log_line unblock "The unblock round judged $CURRENT_STORY_ID blocked and restructured the backlog in $PRD_REL_PATH."
       ralph_log_line unblock "Stories now: $(jq -r '[.userStories[].id] | join(", ")' "$PRD_FILE" 2>/dev/null || echo "unreadable")"
@@ -855,6 +880,7 @@ EOF
       exit 1
     fi
 
+    ralph_status_unblock_outcome "stopped" || true
     # Release the pinned row before printing the durable handoff so the report
     # remains readable at the user's shell prompt.
     ralph_progress_stop || true
@@ -882,7 +908,7 @@ EOF
   if [[ "$ALL_COMPLETE" == "true" ]] && merge_back_needed; then
     ralph_log_line success "All stories are marked complete in $PRD_FILE. The next round will run the dedicated merge-back round."
   elif [[ "$ALL_COMPLETE" == "true" ]]; then
-    ralph_progress_update "complete" "" "$ROUND"
+    ralph_status_update "complete" "" "$ROUND"
     echo ""
     ralph_log_line success "Ralph completed all tasks!"
     ralph_log_line success "Completed at round $ROUND"

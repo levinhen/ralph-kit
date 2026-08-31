@@ -99,6 +99,31 @@ npm test
   phase. Changing one without the other makes the row and the banner disagree
   about whether the run is on the happy path. Both READMEs document the table.
 
+- **Run status is written unconditionally; the pinned row is not.** A run's
+  state reaches two places: `lib/progress-bar.sh` pins it to an interactive
+  terminal, and `lib/run-status.sh` writes it to
+  `ralph/status/<run_id>.json`. Only the first is allowed to give up when the
+  streams are not a tty — `orchestrate.sh` redirects every parallel run to a log
+  file, so a status file gated on a tty would be empty in exactly the case it
+  exists for. `ralph_status_update` is the single front door: it drives both,
+  and nothing should call `ralph_progress_update` directly again. The file stays
+  out of `ralph/runs/` deliberately — consolidation moves that directory into
+  `ralph/archive/` and stages it with `git add -A`, and runtime state has no
+  business in a commit.
+  `orchestrate.sh` reads those files into a status board pinned to its own
+  terminal (`lib/status-board.sh`). Like the log colours and the progress row,
+  it writes SGR and cursor codes to `/dev/tty` only: the tests capture the
+  orchestrator's stdout and every parallel run's output is a log file, and both
+  must stay byte-identical plain text. `tests/run-status.sh` asserts that, and
+  asserts the status file is current *mid-run* rather than only at exit.
+- **The unblock round's verdict is a fourth thing the status file carries.**
+  `unblockRounds` counts the phase transition into `unblocking`; the outcome is
+  stamped by `ralph_status_unblock_outcome` at each of the three exits in
+  `ralph.sh` — `finished`, `restructured`, `stopped`. The board keeps that
+  marker on a finished run's row, because a run whose output went to a file has
+  no other cheap way to say it left the happy path. Adding a fourth exit to the
+  failure path means stamping it there too, or the row silently reports the
+  previous verdict.
 - **The failure path is described in four places.** Story failure runs exactly
   one round (`UNBLOCK_STORY.md`), which decides whether the story is genuinely
   blocked or was merely unfinished: unfinished means it gets completed there,
@@ -122,3 +147,9 @@ npm test
 with a stubbed agent CLI. They all exercise **legacy mode** (state at
 `ralph/prd.json`, no run directories). No test covers the run-scoped worktree
 path, so bugs in worktree syncing do not get caught — verify those by hand.
+
+Nothing that needs a real terminal is covered either: the pinned progress row
+and the orchestrator's status board only render when stdout is a tty, which no
+test has. `tests/run-status.sh` covers the half that survives redirection — the
+status files, and the fact that no escape sequence leaks into them. Verify the
+rendering itself by hand, or under a pty.

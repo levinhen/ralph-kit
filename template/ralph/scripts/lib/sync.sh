@@ -5,6 +5,7 @@
 _RALPH_OVERLAY_EXCLUDES=(
   ':(exclude).worktrees'
   ':(exclude)ralph/locks'
+  ':(exclude)ralph/status'
   ':(exclude)ralph/runs'
   ':(exclude)ralph/archive'
   ':(exclude)ralph/.last-branch'

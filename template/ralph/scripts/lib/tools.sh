@@ -133,12 +133,12 @@ run_selected_tool() {
 
   # The watchdog polls this file to decide whether the tool is wedged; the status
   # row reads its mtime to show the same silence to the user while it builds.
-  ralph_progress_set_activity "$activity_file"
+  ralph_status_set_activity "$activity_file"
 
   start_tracked_process "$run_cwd" "$prompt_file" "$output_fifo" "${command_args[@]}"
   wait_for_active_tool "$activity_file" counter || tool_exit_code=$?
 
-  ralph_progress_set_activity ""
+  ralph_status_set_activity ""
 
   finalize_tool_cleanup "$run_cwd"
 

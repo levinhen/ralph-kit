@@ -161,6 +161,24 @@ Two of the segments only appear when they have something to say:
 
 A background ticker redraws it every `RALPH_PROGRESS_TICK_SECONDS` (default 2) so the clocks keep moving while an agent is silent, and it restores the terminal on its own if Ralph is killed outright. It disables itself when output is redirected (including parallel orchestrator logs) — control codes only ever go to `/dev/tty`, never into a log; set `RALPH_PROGRESS=0` to turn it off explicitly.
 
+### Watching parallel runs: the orchestrator status board
+
+The pinned row needs both streams to be a tty, and `orchestrate.sh` redirects every parallel run to its own log file — so inside those runs it never starts. To keep the orchestrator's own terminal from going silent between launch and the final `ok`/`FAILED`, every run also writes its state to `ralph/status/<run_id>.json` unconditionally, and the orchestrator pins one row per run at the bottom of *its* terminal:
+
+```
+ ● 20260817-auth    story       3/8 US-004 r7 4m12s  Add token accounting
+ ⚑ 20260817-bill    unblock     1/5 US-002 r4 3m11s  Show the invoice rows
+ ○ 20260817-report  pending     <- 20260817-auth
+ ✓ 20260817-search  done        6/6 [resplit x1]
+ 2 running  1 done  0 failed  - logs under ralph/runs/<run>/
+```
+
+Rows use the same hues as the log below them, so an unblock round is yellow on the board for the same reason its banner is. `[resplit x1]` / `[unblocked x1]` / `[unblock gave up]` stay on a finished run's row: that one round is the most useful thing to know about a run whose output went to a file, and it would otherwise be buried in thousands of lines of agent chatter.
+
+Running runs are drawn first, so when there are more runs than the board can hold (it never takes more than half the terminal, or 12 rows), the ones dropped into the `(+N more)` counter are the ones nothing is happening in. `RALPH_BOARD=0` turns it off. Like everything else here, the board writes only to `/dev/tty`; the per-run log files stay plain text.
+
+The status files are also readable on their own — `jq . ralph/status/*.json` from a second terminal answers "where is this run" without touching the orchestrator. They live outside `ralph/runs/` on purpose: consolidation archives that directory and stages it, and runtime state has no business in a commit.
+
 ### Colour in the log
 
 A round prints thousands of lines of agent output, so the handful of lines that say where the loop actually is are colour-coded. One hue always means the same thing:
@@ -258,6 +276,7 @@ With no `--plan`, the orchestrator reads `dependsOnRuns` across the incomplete r
 | `RALPH_TOOL_TIMEOUT_SECONDS` | `0` (off) | hard cap per invocation |
 | `RALPH_SHARED_MEMORY_ITEMS` / `RALPH_STORY_PROGRESS_RECORDS` | `40` / `5` | prompt memory slice sizes |
 | `RALPH_PROGRESS` | `1` | pinned story progress in interactive terminals; set to `0` to disable |
+| `RALPH_BOARD` | `1` | orchestrator status board (one row per parallel run); set to `0` to disable |
 | `RALPH_PROGRESS_IDLE_MIN` | `30` | seconds of agent silence before the idle clock appears |
 | `RALPH_LOG_COLOR` | `auto` | colour on the loop's own status lines; `0` forces plain text, `1` forces colour even when redirected (`NO_COLOR` also disables it) |
 | `RALPH_MAX_FINALIZE_ROUNDS` / `RALPH_MAX_MERGE_BACK_ROUNDS` / `RALPH_MAX_CONSOLIDATION_ROUNDS` | `3` each | how often a wrap-up round may retry itself before Ralph stops |
@@ -299,6 +318,7 @@ silently ignored and never make the command fail.
 
 - `ralph/tasks/` — PRD markdown authored by the `/prd` skill
 - `ralph/runs/` — in-progress Ralph runs
+- `ralph/status/` — one live status file per run, written every phase and read by the orchestrator's board
 - `ralph/archive/` — completed/consolidated runs and their source PRDs
 - `ralph/locks/` — runtime lock directories
 - `ralph/progress/`, `ralph/stories/`, `ralph/prd.json`, `ralph/progress.txt`, `ralph/state.json`, `ralph/.last-branch`, `ralph/.merge-back-done` — legacy-mode runtime files

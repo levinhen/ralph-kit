@@ -24,6 +24,9 @@ Take a PRD (markdown file or text) and convert it to a run-scoped `prd.json` und
 [Sweep the Runs Still in Flight](#step-0-sweep-the-runs-still-in-flight) below. That sweep is where `dependsOnRuns`
 comes from, and it is the only thing standing between you and re-splitting work another run is already executing.
 
+**Then ask whether this work needs a run at all** — see [Small Work Does Not Get a Run](#small-work-does-not-get-a-run).
+A run's overhead is per run, not per story; a PRD one direct session could finish pays all of it for nothing.
+
 **This is not a mechanical transcription.** Before splitting the PRD into stories, validate that the approach baked into
 the PRD actually fits the user's need — see [Validate the Approach Before Splitting Stories](#validate-the-approach-before-splitting-stories)
 below. Only after the approach is sound (or corrected) do you split it into user stories.
@@ -116,6 +119,36 @@ Then let the sweep drive three decisions:
 
 Whether the PRD in front of you already has a run of its own is a separate check with its own rules — see
 [Run Directory Handling](#run-directory-handling).
+
+---
+
+## Small Work Does Not Get a Run
+
+A run's overhead is fixed per run, not per story. Every story round is a fresh session that re-reads the repo and
+re-runs its checks; after the last story the run pays a scaffold-cleanup round that runs the whole test suite, a
+merge-back, and a consolidation round — the same rounds whether the run had one story or fifteen. Measured on one
+project (2026-09-01, three paired repetitions per task, same model and effort in both arms): a one-story run cost
+about 12× a direct session and a three-story run about 3×, with no quality gain. The direct session finished the
+three-story task in under 100K tokens of context with no compaction; the run's wrap-up rounds alone were 70% of the
+one-story run's cost; and in one repetition the split itself opened a seam — a cross-cutting input check that neither
+story owned.
+
+So before splitting, ask whether one direct session could finish this PRD. It can when:
+
+- the whole change fits in one head: a handful of files, one subsystem, one verification command;
+- a single prompt would come back done within the hour, with nothing lost along the way;
+- nothing needs to survive a session boundary — no resuming after an interruption, no isolating one part's failure,
+  no parallel worktrees, no per-story checkpoints anyone will read;
+- the split would be one to three stories on a serial chain.
+
+Ralph earns its overhead when the backlog would make one session compact or drift (roughly ten or more stories, hours
+of work), when parts are independent enough to run as parallel runs, when the work spans days and must resume from the
+last passing story, or when the process artifacts themselves are wanted — per-story checkpoints, unblock rounds,
+scaffold cleanup, a design-ledger entry.
+
+If one session could finish it, say so to the user in one line with the reason, and offer to implement it directly
+instead of converting. Convert anyway only if the user, told this, still wants a run — it is their call, and this
+skill never refuses. What it must not do is create a one-story run silently.
 
 ---
 
@@ -567,6 +600,10 @@ Rules for a multi-run split:
 4. **Apply the same closure check at run level.** Ask of each run: "when this run's stories all pass, what does the
    base branch observably do that it could not do before?" A run with no answer is a layer, not a deliverable — merge
    it into the run that consumes it.
+5. **Do not split below the overhead floor.** Every run pays the same wrap-up rounds regardless of size (see
+   [Small Work Does Not Get a Run](#small-work-does-not-get-a-run)). A run of one or two stories is mostly wrap-up:
+   fold it into the run that consumes it or into a neighbour it can share a branch with, and if it stands alone that
+   small, it is direct work, not a run.
 
 `orchestrate.sh` reads `dependsOnRuns` across `ralph/runs/*/prd.json`, starts every run whose dependencies are already
 merged back (or archived), runs independent runs in parallel, and blocks a run's downstream when it fails. Completed
@@ -717,6 +754,7 @@ Before writing run-scoped `prd.json`, verify:
 - [ ] Swept `ralph/tasks/` and `ralph/runs/` for work still in flight and reported it before splitting
 - [ ] No story re-implements a slice an in-flight run already owns, and no criterion assumes code from an unmerged run
 - [ ] Validated the PRD's approach against the user need; if it looked off, confirmed the approach with the user before splitting
+- [ ] Checked the work is Ralph-sized: one direct session could not finish it, or the user chose a run knowing the overhead
 - [ ] `userNeed` (the business-language restatement) is set once at the root (the script copies it into each story at split time)
 - [ ] Every story's `description` ends with a `Covers:` clause, and the clauses tile the whole `userNeed` (no gaps/overlap)
 - [ ] `run_id` is unique and valid for `ralph.sh --run <run_id>`

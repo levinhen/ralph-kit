@@ -21,13 +21,16 @@ Create detailed Product Requirements Documents that are clear, actionable, and s
 2. Receive a feature description from the user
 3. Ask clarifying questions (with lettered options), prioritized by importance — no fixed count
 4. Review the answers and ask follow-up questions for anything still ambiguous; iterate until the key information is clear
-5. Restate the need in plain business language and get the user's confirmation before writing
-6. Generate a structured PRD that neither duplicates nor silently contradicts an in-flight PRD; record any minor remaining uncertainties in Open Questions
-7. Save to `ralph/tasks/prd-<feature-name>.md` (substitute `<feature-name>` with a kebab-case slug)
+5. Judge whether the work is Ralph-sized at all; if one session could finish it, say so before writing anything (Step 2b)
+6. Restate the need in plain business language and get the user's confirmation before writing
+7. Generate a structured PRD that neither duplicates nor silently contradicts an in-flight PRD; record any minor remaining uncertainties in Open Questions
+8. Save to `ralph/tasks/prd-<feature-name>.md` (substitute `<feature-name>` with a kebab-case slug)
 
 **Important:** Do NOT start implementing. Just create the PRD.
 
-If the user also wants the PRD prepared for Ralph execution, use the `ralph` skill after saving the markdown PRD. The
+If the user also wants the PRD prepared for Ralph execution, use the `ralph` skill after saving the markdown PRD —
+but only when the work is Ralph-sized; [Step 2b](#step-2b-is-this-ralph-sized-work) says how to tell, and a task one
+session could finish should not be offered a run. The
 markdown task remains in `ralph/tasks/` while the run is in play (Ralph archives it into
 `ralph/archive/<date>-<run_id>/` once the run completes), while the Ralph execution file should be generated as
 `ralph/runs/<run_id>/prd.json`. The Ralph skill/script owns run-scoped execution state such as
@@ -157,6 +160,40 @@ After each round of answers:
 **Knowing when to stop:** stop once every blocking question is resolved — don't loop forever chasing minor details.
 Any small remaining uncertainties that aren't worth blocking on go into the PRD's **Open Questions** section
 (Step 4 → section 9), not another round of questions.
+
+---
+
+## Step 2b: Is This Ralph-Sized Work?
+
+By now the answers tell you the shape of the work. Before you write anything, decide whether it is big enough to be a
+Ralph run at all — and if it is not, say so before the PRD ceremony, not after.
+
+Ralph's overhead is **per run, not per story**: every story is a fresh session that re-reads the repo, and the run
+ends with a scaffold-cleanup round that runs the whole test suite, a merge-back, and a consolidation round, whether
+the run had one story or fifteen. Measured on one project (2026-09-01, three paired repetitions per task, same model
+and effort in both arms): a one-story run cost about 12× a direct session and a three-story run about 3×, with no
+quality gain — the direct session finished the three-story task in under 100K tokens of context with no compaction,
+and the wrap-up rounds alone were 70% of the one-story run's cost.
+
+**The work fits one session — do not offer a Ralph handoff — when:**
+
+- one agent can hold the whole change in view: a handful of files, one subsystem, one verification command;
+- you could hand it over as a single prompt and expect it back within the hour without the agent losing the thread;
+- nothing has to survive a session boundary: no resuming after an interruption, no isolating one part's failure from
+  the rest, no parallel worktrees, no per-story checkpoints anyone will read;
+- it would split into one to three stories on a serial chain.
+
+**Ralph earns its overhead when:**
+
+- the backlog is long enough that one session would compact or drift — roughly ten or more stories, hours of work;
+- parts are independent enough to run as parallel runs;
+- the work spans days and must resume from the last passing story;
+- the process artifacts are wanted: per-story checkpoints, unblock rounds, scaffold cleanup, a design-ledger entry.
+
+When the work fits one session, tell the user in one line, with the reason, and offer the two honest options:
+implement it directly in the conversation (this skill itself still does not implement), or write a lightweight PRD
+with no Ralph handoff. Only convert it to a run if the user, told this, still wants one — that is their call, not a
+rule to enforce.
 
 ---
 
@@ -293,7 +330,8 @@ The PRD reader may be a junior developer or AI agent. Therefore:
 - **Format:** Markdown (`.md`)
 - **Location:** `ralph/tasks/` (moved into `ralph/archive/<date>-<run_id>/` when the matching Ralph run finishes)
 - **Filename:** `prd-<feature-name>.md` (kebab-case)
-- **Ralph handoff:** Only when requested, also create `ralph/runs/<run_id>/prd.json` through the `ralph` skill.
+- **Ralph handoff:** Only when requested, and only for Ralph-sized work (Step 2b), also create
+  `ralph/runs/<run_id>/prd.json` through the `ralph` skill.
 
 ---
 
@@ -393,6 +431,7 @@ Before saving the PRD:
 - [ ] Swept `ralph/tasks/` and `ralph/runs/` for in-flight PRDs and reported them before asking questions
 - [ ] Nothing in this PRD re-specifies work an in-flight PRD owns; every superseded design names the PRD it replaces
 - [ ] Overturning a design a part-run or finished run already built is carried as real user stories here
+- [ ] Judged whether the work is Ralph-sized (Step 2b); if one session could finish it, said so and offered no run unprompted
 - [ ] Asked clarifying questions with lettered options, prioritized (must-answer first)
 - [ ] Asked follow-up questions until the blocking items were clear
 - [ ] Restated the need in business language (no implementation talk) and got the user's confirmation
